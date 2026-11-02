@@ -27,6 +27,7 @@
     "README.md",
     "Run-ACP.cmd",
     "Run-AGY.cmd",
+    "agym.cmd",
     "app/BUILD-MANIFEST.json",
     "app/SHA256SUMS.txt",
     "app/acp_terminal.py",
