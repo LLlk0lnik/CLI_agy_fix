@@ -2,6 +2,7 @@
 """Run the native agy UI against a private, loopback-only Gemini/CCPA bridge."""
 import contextlib
 import http.server
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,10 @@ ROOT = Path(__file__).resolve().parent
 PROD = 'https://cloudcode-pa.googleapis.com'
 DAILY = 'https://daily-cloudcode-pa.googleapis.com'
 USER_AGENT = client_user_agent()
+
+
+class ReauthenticationRequired(RuntimeError):
+    """The saved refresh token was revoked/expired; no retry can repair it."""
 
 
 def unwrap(value):
@@ -82,6 +87,7 @@ class Backend:
         self.lock = threading.Lock()
         self.access_token = None
         self.expires = 0
+        self.expires_at = 0
         self.project = None
         self.endpoint = None
         self.catalog = None
@@ -94,9 +100,14 @@ class Backend:
             headers['Authorization'] = 'Bearer ' + token
         return self.opener.open(urllib.request.Request(url, data=body, headers=headers), timeout=180)
 
-    def credentials(self):
+    def credentials(self, rejected_token=None):
         with self.lock:
-            if self.access_token and time.monotonic() < self.expires:
+            if rejected_token is not None and self.access_token == rejected_token:
+                self.expires = self.expires_at = 0
+            # The wall-clock deadline also catches sleep on clocks that pause in suspend.
+            # Keep monotonic time too, so setting the wall clock backwards cannot extend TTL.
+            if (self.access_token and time.monotonic() < self.expires
+                    and time.time() < self.expires_at):
                 return self.access_token, self.project, self.endpoint
             try:
                 data = json.loads(self.token_path.read_text())
@@ -105,30 +116,62 @@ class Backend:
             # Credentials only go to Google's fixed OAuth endpoint, never a URL from a file.
             form = {'grant_type': 'refresh_token', 'client_id': data['client_id'],
                     'client_secret': data['client_secret'], 'refresh_token': data['refresh_token']}
-            with self.post('https://oauth2.googleapis.com/token', form, form=True) as response:
-                fresh = json.load(response)
+            started_monotonic, started_wall = time.monotonic(), time.time()
+            try:
+                with self.post('https://oauth2.googleapis.com/token', form, form=True) as response:
+                    fresh = json.load(response)
+            except urllib.error.HTTPError as error:
+                if error.code == 400:
+                    raw = error.read()
+                    try:
+                        reason = json.loads(raw).get('error')
+                    except (ValueError, AttributeError):
+                        reason = None
+                    if reason == 'invalid_grant':
+                        error.close()
+                        raise ReauthenticationRequired(
+                            'Google отозвал или просрочил refresh token. Выполните Login из папки setup.'
+                        ) from None
+                    error.close()
+                    raise urllib.error.HTTPError(error.url, error.code, error.reason,
+                                                 error.headers, io.BytesIO(raw)) from None
+                raise
             token = fresh['access_token']
             with self.post(PROD + '/v1internal:loadCodeAssist',
                            {'metadata': {'ideType': 'ANTIGRAVITY'}}, token) as response:
                 entitlement = json.load(response)
             project, endpoint = resolve_entitlement(entitlement)
             self.access_token, self.project, self.endpoint = token, project, endpoint
-            self.expires = time.monotonic() + max(0, int(fresh.get('expires_in', 3600)) - 60)
+            lifetime = max(0, int(fresh.get('expires_in', 3600)) - 60)
+            self.expires = started_monotonic + lifetime
+            self.expires_at = started_wall + lifetime
             return token, project, endpoint
 
-    def models(self):
+    def authenticated_post(self, method, payload):
         token, project, endpoint = self.credentials()
-        with self.post(endpoint + '/v1internal:fetchAvailableModels', {'project': project}, token) as response:
+        try:
+            return self.post(endpoint + '/v1internal:' + method, payload(project), token)
+        except urllib.error.HTTPError as error:
+            if error.code != 401:
+                raise
+            error.close()
+        # Refresh under the credential lock only if this is still the rejected token.
+        # Another request may already have refreshed it while we were in flight.
+        token, project, endpoint = self.credentials(rejected_token=token)
+        # Exactly one retry, before any response body is handed to the caller.
+        return self.post(endpoint + '/v1internal:' + method, payload(project), token)
+
+    def models(self):
+        with self.authenticated_post('fetchAvailableModels', lambda project: {'project': project}) as response:
             return json.load(response)
 
     def generate(self, model, body, streaming):
-        token, project, endpoint = self.credentials()
         if self.catalog is None:
             self.catalog = self.models().get('models', {})
         model = canonical_model(model, self.catalog)
         rpc = 'streamGenerateContent?alt=sse' if streaming else 'generateContent'
-        return self.post(endpoint + '/v1internal:' + rpc,
-                         {'project': project, 'model': model, 'request': body}, token)
+        return self.authenticated_post(rpc, lambda project: {
+            'project': project, 'model': model, 'request': body})
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -171,6 +214,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if isinstance(models, dict):
                 models = [dict(v, name='models/' + k) for k, v in models.items()]
             self.reply(200, {'models': models})
+        except ReauthenticationRequired as error:
+            self.reply(401, {'error': {'code': 401, 'message': str(error)}})
         except Exception:
             self.reply(502, {'error': {'code': 502, 'message': 'Failed to load backend models'}})
 
@@ -197,6 +242,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             upstream = self.server.backend.generate(urllib.parse.unquote(match[1]), body, streaming)
+        except ReauthenticationRequired as error:
+            self.reply(401, {'error': {'code': 401, 'message': str(error)}})
+            return
         except urllib.error.HTTPError as error:
             # Relay Google's actual error; no eligibility or model response is forged.
             raw = error.read()
