@@ -1,0 +1,56 @@
+{
+  "package_name": "agyCLI-macos-arm64",
+  "wrapper_version": "1.2.0",
+  "platform": "macos-arm64",
+  "build_date": "2026-11-02",
+  "python": "3.11+ recommended; stdlib only",
+  "agy_version": "1.4.12",
+  "acp_version": "1.4.5",
+  "tested_on_real_target": true,
+  "validation": "21 common Python tests on macOS, including Windows path/env branches; macOS real native reply/fixture read; Windows runtime execution NOT tested",
+  "contains_user_state": false,
+  "binaries": {
+    "agy": {
+      "sha256": "34423fc9b0af3841e7646aa72a2d40ffeab8218b22d1cb99eac7355f9eba31e3",
+      "size": 197589952
+    },
+    "agy_acp_server.par": {
+      "sha256": "fb2581fb49738263db15ffccf3f48d979794ffb748350e85c335953f6b6522a2",
+      "size": 178915920
+    },
+    "localharness_external": {
+      "sha256": "9d87cb505e6efa316f55bb98459de614de867dce43cdeb5677b2153d77c283e8",
+      "size": 122957936
+    }
+  },
+  "distribution_files": [
+    "README.md",
+    "Run-ACP.command",
+    "Run-AGY.command",
+    "app/BUILD-MANIFEST.json",
+    "app/SHA256SUMS.txt",
+    "app/acp_terminal.py",
+    "app/agy_native.py",
+    "app/config.example.json",
+    "app/config.json",
+    "app/diagnostics.py",
+    "app/launcher_common.py",
+    "app/pack_clean.py",
+    "app/run_tests.py",
+    "app/runtime/agy",
+    "app/runtime/agy_acp_server.par",
+    "app/runtime/localharness_external",
+    "app/tests/test_acp_terminal.py",
+    "app/tests/test_agy_native.py",
+    "app/tests/test_launcher_common.py",
+    "app/verify_package.py",
+    "docs/README-AI.md",
+    "docs/THIRD-PARTY.md",
+    "setup/Check.command",
+    "setup/Login.command"
+  ],
+  "upstream_acp_archive": {
+    "url": "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.5-darwin-arm64.zip",
+    "sha256": "886fff7767d08994ca39eb02c3d01a7532c7325a94aa33aaf52d52068733284f"
+  }
+}

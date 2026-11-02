@@ -1,0 +1,8 @@
+# Original platform binaries exceed GitHub's normal file-size limit.
+macOS/app/runtime/* filter=lfs diff=lfs merge=lfs -text
+Windows/app/runtime/* filter=lfs diff=lfs merge=lfs -text
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.command text eol=lf
+*.cmd text eol=crlf

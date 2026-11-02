@@ -1,0 +1,33 @@
+# Local accounts, histories and sensitive runtime state
+**/profile/
+**/profiles/
+**/.gemini/
+**/acp_token.json
+**/acp_business_token.json
+**/*credentials*.json
+**/*token*.json
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# User-made archives and build/cache output
+*.zip
+*.7z
+*.tar
+*.tar.gz
+ARCHIVE-SHA256.txt
+**/dist/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+Thumbs.db
