@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# Определение базовой директории пакета
+if [ -n "${AGY_HOME:-}" ] && [ -f "$AGY_HOME/app/agy_native.py" ]; then
+  BASE_DIR="$AGY_HOME"
+else
+  # Разрешаем симлинки, если agym вызван из PATH (например, ~/.local/bin/agym)
+  SELF_DIR="$(python3 -c "import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))" "$0" 2>/dev/null || true)"
+  if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/app/agy_native.py" ]; then
+    BASE_DIR="$SELF_DIR"
+  elif [ -d "$HOME/Desktop/agyCLI-macos-arm64" ] && [ -f "$HOME/Desktop/agyCLI-macos-arm64/app/agy_native.py" ]; then
+    BASE_DIR="$HOME/Desktop/agyCLI-macos-arm64"
+  elif [ -d "$HOME/Desktop/CLI_agy_fix/macOS" ] && [ -f "$HOME/Desktop/CLI_agy_fix/macOS/app/agy_native.py" ]; then
+    BASE_DIR="$HOME/Desktop/CLI_agy_fix/macOS"
+  elif [ -d "$HOME/.local/share/agyCLI" ] && [ -f "$HOME/.local/share/agyCLI/app/agy_native.py" ]; then
+    BASE_DIR="$HOME/.local/share/agyCLI"
+  else
+    echo "Ошибка: директория пакета agyCLI не найдена." >&2
+    echo "Убедитесь, что agym находится в папке с app/agy_native.py или задайте AGY_HOME=/путь." >&2
+    exit 1
+  fi
+fi
+
+PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Ошибка: python3 не найден в PATH. Установите Python 3.11+: https://www.python.org/downloads/" >&2
+  exit 1
+fi
+
+show_help() {
+  cat << 'HELP_TEXT'
+Использование: agym [команда | флаги agy]
+
+agym — модифицированный запуск Antigravity CLI с туннелированием через Happ (локальный прокси) и изолированным профилем.
+
+Сервисные команды:
+  agym login | --login       Авторизация в Google через браузер (OAuth)
+  agym check | --check       Проверка прокси Happ, бинарников и профиля
+  agym acp   | --acp [args]  Запуск прямого текстового ACP-клиента
+  agym config | --config     Показать путь и текущий config.json (порты Happ)
+  agym install               Создать симлинк в ~/.local/bin/agym для доступа отовсюду
+  agym help  | --help | -h   Показать эту справку
+
+Авто-подтверждение (режим без вопросов):
+  -y, -d, --yolo, --danger   Короткие алиасы для --dangerously-skip-permissions
+                             (автоматически одобряет действия и команды без вопросов)
+
+Команды и флаги agy CLI:
+  agym                       Запустить agy CLI в текущей папке
+  agym -y                    Запустить в режиме авто-одобрения без лишних вопросов
+  agym yolo                  То же самое (алиас для agym -y)
+  agym -p, --print "..."     Быстрый одиночный запрос в консоли
+  agym -c, --continue        Продолжить предыдущую сессию в проекте
+  agym --model <ID>          Выбрать модель (по умолчанию gemini-3.8-flash-high)
+  agym -- [args]             Принудительно передать аргументы напрямую в agy
+HELP_TEXT
+}
+
+install_symlink() {
+  TARGET_DIR="$HOME/.local/bin"
+  mkdir -p "$TARGET_DIR"
+  REAL_SCRIPT="$(python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+  ln -sf "$REAL_SCRIPT" "$TARGET_DIR/agym"
+  echo "Симлинк успешно создан: $TARGET_DIR/agym -> $REAL_SCRIPT"
+  case ":$PATH:" in
+    *:"$TARGET_DIR":*)
+      echo "Папка $TARGET_DIR уже есть в вашем PATH. Команда 'agym' доступна из любого каталога!"
+      ;;
+    *)
+      echo "Внимание: добавьте $TARGET_DIR в ваш PATH в ~/.zshrc:"
+      echo '  export PATH="$HOME/.local/bin:$PATH"'
+      ;;
+  esac
+}
+
+case "${1:-}" in
+  login|--login)
+    shift
+    exec "$PYTHON_BIN" "$BASE_DIR/app/acp_terminal.py" --login "$@"
+    ;;
+  check|--check)
+    shift
+    exec "$PYTHON_BIN" "$BASE_DIR/app/diagnostics.py" "$@"
+    ;;
+  acp|--acp)
+    shift
+    exec "$PYTHON_BIN" "$BASE_DIR/app/acp_terminal.py" "$@"
+    ;;
+  config|--config)
+    echo "Файл конфигурации: $BASE_DIR/app/config.json"
+    echo "----------------------------------------"
+    cat "$BASE_DIR/app/config.json"
+    echo ""
+    exit 0
+    ;;
+  install|--install)
+    install_symlink
+    exit 0
+    ;;
+  help|--help|-h)
+    show_help
+    exit 0
+    ;;
+  --)
+    shift
+    exec "$PYTHON_BIN" "$BASE_DIR/app/agy_native.py" "$@"
+    ;;
+esac
+
+# Преобразование коротких флагов для автоподтверждения
+PROCESSED_ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    -y|-d|--danger|--yolo|yolo|--skip-permissions)
+      PROCESSED_ARGS+=("--dangerously-skip-permissions")
+      ;;
+    *)
+      PROCESSED_ARGS+=("$arg")
+      ;;
+  esac
+done
+
+exec "$PYTHON_BIN" "$BASE_DIR/app/agy_native.py" "${PROCESSED_ARGS[@]}"
