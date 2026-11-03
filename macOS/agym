@@ -38,7 +38,9 @@ agym — модифицированный запуск Antigravity CLI с тун
   agym login | --login       Авторизация в Google через браузер (OAuth)
   agym check | --check       Проверка прокси Happ, бинарников и профиля
   agym acp   | --acp [args]  Запуск прямого текстового ACP-клиента
-  agym config | --config     Показать путь и текущий config.json (порты Happ)
+  agym config | --config     Показать действующий config.json (порты Happ)
+  agym update [--check]      Обновить установку из git (--check — только проверить)
+  agym --version             Показать версию обёртки, agy и ACP
   agym install               Создать симлинк в ~/.local/bin/agym для доступа отовсюду
   agym help  | --help | -h   Показать эту справку
 
@@ -88,11 +90,24 @@ case "${1:-}" in
     exec "$PYTHON_BIN" "$BASE_DIR/app/acp_terminal.py" "$@"
     ;;
   config|--config)
-    echo "Файл конфигурации: $BASE_DIR/app/config.json"
+    CONFIG="$BASE_DIR/app/config.json"
+    if [ -f "$CONFIG" ]; then
+      echo "Файл конфигурации: $CONFIG"
+    else
+      CONFIG="$BASE_DIR/app/config.example.json"
+      echo "Локальный config.json не создан; действуют значения по умолчанию: $CONFIG"
+    fi
     echo "----------------------------------------"
-    cat "$BASE_DIR/app/config.json"
+    cat "$CONFIG"
     echo ""
     exit 0
+    ;;
+  update|--update)
+    shift
+    exec "$PYTHON_BIN" "$BASE_DIR/app/update.py" "$@"
+    ;;
+  version|--version)
+    exec "$PYTHON_BIN" "$BASE_DIR/app/update.py" --version
     ;;
   install|--install)
     install_symlink

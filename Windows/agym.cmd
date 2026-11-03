@@ -26,6 +26,10 @@ if "%~1"=="acp" goto do_acp
 if "%~1"=="--acp" goto do_acp
 if "%~1"=="config" goto do_config
 if "%~1"=="--config" goto do_config
+if "%~1"=="update" goto do_update
+if "%~1"=="--update" goto do_update
+if "%~1"=="--version" goto do_version
+if "%~1"=="version" goto do_version
 if "%~1"=="help" goto do_help
 if "%~1"=="--help" goto do_help
 if "%~1"=="-h" goto do_help
@@ -47,9 +51,24 @@ shift
 exit /b %errorlevel%
 
 :do_config
+if exist "%BASE_DIR%app\config.json" goto show_local_config
+echo Local config.json not created; using defaults from app\config.example.json
+type "%BASE_DIR%app\config.example.json"
+exit /b 0
+
+:show_local_config
 echo Config file: %BASE_DIR%app\config.json
 type "%BASE_DIR%app\config.json"
 exit /b 0
+
+:do_update
+shift
+%PY_CMD% "%BASE_DIR%app\update.py" %*
+exit /b %errorlevel%
+
+:do_version
+%PY_CMD% "%BASE_DIR%app\update.py" --version
+exit /b %errorlevel%
 
 :do_help
 echo Usage: agym [command ^| agy flags]
@@ -59,6 +78,8 @@ echo   agym login ^| --login       Browser OAuth login
 echo   agym check ^| --check       Check proxy, runtimes, and profile
 echo   agym acp   ^| --acp [args]  Direct text ACP client
 echo   agym config ^| --config     Show config.json and proxy ports
+echo   agym update [--check]      Update this install from git (--check: dry run)
+echo   agym --version             Show wrapper, agy and ACP versions
 echo   agym help  ^| --help        Show this help
 echo.
 echo Auto-approve:

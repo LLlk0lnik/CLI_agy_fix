@@ -23,6 +23,28 @@ ZIP через кнопку GitHub Download ZIP может содержать LF
 
 После загрузки следуйте README соответствующей платформы. Не устанавливайте повторно существующие Python, Happ и agy; версия agy для этой сборки уже есть в runtime. Windows x64 адаптирована, но не проверена реальным запуском на Windows.
 
+## Обновление до новой версии
+
+Клон репозитория и есть установка, поэтому обновление — одна команда в терминале:
+
+```bash
+./macOS/agym update --check   # показать доступные версии, ничего не меняет
+./macOS/agym update           # применить обновление
+```
+
+После `./agym install` то же доступно отовсюду как `agym update`. Что делает команда: `git fetch` текущей ветки, отказ при незакоммиченных правках в отслеживаемых файлах, fast-forward merge, догрузка изменившихся бинарников через Git LFS (только если версия agy/ACP изменилась), проверка `SHA256SUMS.txt` и печать перехода версий. `agym --version` показывает установленные версии обёртки, agy и ACP.
+
+Локальный профиль `app/profile` и файл `app/config.json` обновление не затрагивает: `config.json` не входит в репозиторий, а значения по умолчанию берутся из `app/config.example.json`. Windows: `agym.cmd update` и `agym.cmd update --check`.
+
+## Сборка новой версии
+
+```bash
+python3 tools/release.py macOS --version 1.3.0   # macOS
+python3 tools/release.py Windows --version 1.3.0 # Windows
+```
+
+Скрипт пересчитывает SHA256 бинарников и `SHA256SUMS.txt`, обновляет `BUILD-MANIFEST.json`, прогоняет тесты и собирает чистый ZIP через `app/pack_clean.py`. Руками версии и хеши править не нужно.
+
 ## Быстрый старт с `agym` (macOS)
 
 ```bash

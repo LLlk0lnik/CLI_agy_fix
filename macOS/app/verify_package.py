@@ -23,7 +23,7 @@ def main():
             errors.append('Changed: ' + relative)
     if errors:
         print('\n'.join(errors))
-        print('A changed config.json is expected if you edited proxy ports. Other changes need review.')
+        print('Tracked files were changed after the release. Restore them or run tools/release.py.')
         return 1
     print('OK: all shipped files match SHA256SUMS.txt. Local profile files are not part of the distribution.')
     return 0

@@ -22,7 +22,7 @@ def main(root=None):
     destination = metadata / 'dist'
     destination.mkdir(exist_ok=True)
     target = destination / (manifest['package_name'] + '-clean.zip')
-    sources = {name: (root / name).with_name('config.example.json') if Path(name).name == 'config.json' else root / name for name in files}
+    sources = {name: root / name for name in files}
     hashes = []
     for name, source in sources.items():
         if Path(name).name == 'SHA256SUMS.txt':
@@ -43,7 +43,7 @@ def main(root=None):
             else:
                 archive.write(sources[name], arcname)
     print('Created: ' + str(target))
-    print('Excluded: all profiles, accounts, logs, history and caches. config.json reset to example defaults.')
+    print('Excluded: all profiles, accounts, logs, history and caches. Local config.json is not shipped; config.example.json is.')
 
 
 if __name__ == '__main__':
