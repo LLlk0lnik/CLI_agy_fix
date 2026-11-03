@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 from launcher_common import (configuration, clean_environment, proxy_environment,
                              private_home_environment, runtime_path, client_user_agent)
+from route_health import RoutePool, NoRedirect, NoAvailableRoute, classify_error, has_model_answer
 
 ROOT = Path(__file__).resolve().parent
 PROD = 'https://cloudcode-pa.googleapis.com'
@@ -82,8 +83,9 @@ class Backend:
     def __init__(self, token_path, config=None):
         self.token_path = token_path
         config = configuration() if config is None else config
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({
-            'http': config['http_proxy'], 'https': config['http_proxy']}))
+        self.routes = RoutePool(config['http_proxy'], config.get('fallback_http_proxies', []))
+        # Never let inherited NO_PROXY or system bypass settings send Google direct.
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         self.lock = threading.Lock()
         self.access_token = None
         self.expires = 0
@@ -92,13 +94,21 @@ class Backend:
         self.endpoint = None
         self.catalog = None
 
-    def post(self, url, data, token=None, form=False):
+    def post(self, url, data, token=None, form=False, route=None):
         body = (urllib.parse.urlencode(data).encode() if form else json.dumps(data).encode())
         headers = {'Content-Type': 'application/x-www-form-urlencoded' if form else 'application/json',
                    'User-Agent': USER_AGENT}
         if token:
             headers['Authorization'] = 'Bearer ' + token
-        return self.opener.open(urllib.request.Request(url, data=body, headers=headers), timeout=180)
+        route = route or self.routes.choose()
+        if route is None:
+            raise NoAvailableRoute()
+        request = urllib.request.Request(url, data=body, headers=headers)
+        request.add_unredirected_header('Host', urllib.parse.urlsplit(url).netloc)
+        request.set_proxy(urllib.parse.urlsplit(route).netloc, 'http')
+        response = self.opener.open(request, timeout=180)
+        response.agycli_route = route
+        return response
 
     def credentials(self, rejected_token=None):
         with self.lock:
@@ -149,17 +159,36 @@ class Backend:
 
     def authenticated_post(self, method, payload):
         token, project, endpoint = self.credentials()
-        try:
-            return self.post(endpoint + '/v1internal:' + method, payload(project), token)
-        except urllib.error.HTTPError as error:
-            if error.code != 401:
-                raise
-            error.close()
-        # Refresh under the credential lock only if this is still the rejected token.
-        # Another request may already have refreshed it while we were in flight.
-        token, project, endpoint = self.credentials(rejected_token=token)
-        # Exactly one retry, before any response body is handed to the caller.
-        return self.post(endpoint + '/v1internal:' + method, payload(project), token)
+        attempted = set()
+        auth_retried = False
+        route = self.routes.choose()
+        while route is not None:
+            try:
+                return self.post(endpoint + '/v1internal:' + method, payload(project), token, route=route)
+            except urllib.error.HTTPError as error:
+                if error.code == 401 and not auth_retried:
+                    error.close()
+                    token, project, endpoint = self.credentials(rejected_token=token)
+                    auth_retried = True
+                    continue
+                if error.code != 400:
+                    raise
+                raw = error.read()
+                error.close()
+                preserved = urllib.error.HTTPError(error.url, error.code, error.reason,
+                                                   error.headers, io.BytesIO(raw))
+                if classify_error(error.code, raw) != 'region':
+                    raise preserved from None
+                self.routes.reject_region(route)
+                attempted.add(route)
+                following = self.routes.choose(attempted)
+                if following is None:
+                    raise preserved from None
+                preserved.close()
+                print('Шлюз: региональный отказ через ' + route + '; следующая попытка через ' + following,
+                      file=sys.stderr)
+                route = following
+        raise NoAvailableRoute()
 
     def models(self):
         with self.authenticated_post('fetchAvailableModels', lambda project: {'project': project}) as response:
@@ -214,6 +243,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if isinstance(models, dict):
                 models = [dict(v, name='models/' + k) for k, v in models.items()]
             self.reply(200, {'models': models})
+        except NoAvailableRoute as error:
+            self.reply(503, {'error': {'code': 503, 'message': str(error)}})
         except ReauthenticationRequired as error:
             self.reply(401, {'error': {'code': 401, 'message': str(error)}})
         except Exception:
@@ -242,13 +273,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             upstream = self.server.backend.generate(urllib.parse.unquote(match[1]), body, streaming)
+        except NoAvailableRoute as error:
+            self.reply(503, {'error': {'code': 503, 'message': str(error)}})
+            return
         except ReauthenticationRequired as error:
             self.reply(401, {'error': {'code': 401, 'message': str(error)}})
             return
         except urllib.error.HTTPError as error:
             # Relay Google's actual error; no eligibility or model response is forged.
             raw = error.read()
-            print('Шлюз: Google HTTP ' + str(error.code) + ', модель ' + match[1], file=sys.stderr)
+            category = classify_error(error.code, raw)
+            print('Шлюз: Google HTTP ' + str(error.code) + ', тип ' + category + ', модель ' + match[1], file=sys.stderr)
+            if category == 'region':
+                print('Шлюз: Google отклонил регион сетевого выхода. Обновление токена не поможет; '
+                      'проверьте сервер/маршрут Happ. Прямой обход прокси отключён.', file=sys.stderr)
             error.close()
             try:
                 data = unwrap(json.loads(raw))
@@ -261,7 +299,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         with contextlib.closing(upstream):
             if not streaming:
-                self.reply(upstream.status, unwrap(json.load(upstream)))
+                value = unwrap(json.load(upstream))
+                if has_model_answer(value) and hasattr(self.server.backend, 'routes'):
+                    self.server.backend.routes.answer(getattr(upstream, 'agycli_route', None))
+                self.reply(upstream.status, value)
                 return
             self.send_response(upstream.status)
             self.send_header('Content-Type', 'text/event-stream')
@@ -276,7 +317,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         payload = line[5:].strip()
                         if payload and payload != b'[DONE]':
                             try:
-                                payload = json.dumps(unwrap(json.loads(payload))).encode()
+                                value = unwrap(json.loads(payload))
+                                if has_model_answer(value) and hasattr(self.server.backend, 'routes'):
+                                    self.server.backend.routes.answer(getattr(upstream, 'agycli_route', None))
+                                payload = json.dumps(value).encode()
                             except (ValueError, UnicodeError):
                                 pass
                         self.wfile.write(b'data: ' + payload + b'\n')

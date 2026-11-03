@@ -10,6 +10,7 @@ DEFAULTS = {
     'http_proxy': 'http://127.0.0.1:10809',
     'socks_proxy': 'socks5h://127.0.0.1:10808',
     'default_model': 'gemini-3.8-flash-high',
+    'fallback_http_proxies': [],
 }
 
 
@@ -19,13 +20,16 @@ def configuration(root=ROOT):
     if path.exists():
         supplied = json.loads(path.read_text(encoding='utf-8-sig'))
         if not isinstance(supplied, dict) or set(supplied) - set(DEFAULTS):
-            raise ValueError('config.json: expected keys http_proxy, socks_proxy, default_model')
+            raise ValueError('config.json: unknown configuration keys')
         config.update(supplied)
-    for key in DEFAULTS:
+    for key in ('http_proxy', 'socks_proxy', 'default_model'):
         if not isinstance(config[key], str) or not config[key]:
             raise ValueError('config.json: invalid ' + key)
     # Proxy URLs never carry credentials in this distribution's settings.
     from urllib.parse import urlsplit
+    fallbacks = config['fallback_http_proxies']
+    if not isinstance(fallbacks, list) or len(fallbacks) > 3 or not all(isinstance(v, str) for v in fallbacks):
+        raise ValueError('fallback_http_proxies must be a list of up to three loopback HTTP proxies')
     http = urlsplit(config['http_proxy'])
     socks = urlsplit(config['socks_proxy'])
     if http.scheme != 'http' or http.hostname not in ('127.0.0.1', 'localhost', '::1') or not http.port:
@@ -34,6 +38,12 @@ def configuration(root=ROOT):
         raise ValueError('socks_proxy must be a loopback SOCKS5 proxy URL with a port')
     if http.username or http.password or socks.username or socks.password:
         raise ValueError('Do not store proxy credentials in config.json')
+    for url in [config['http_proxy'], *fallbacks]:
+        proxy = urlsplit(url)
+        if (proxy.scheme != 'http' or proxy.hostname not in ('127.0.0.1', 'localhost', '::1')
+                or not proxy.port or proxy.username or proxy.password
+                or proxy.path not in ('', '/') or proxy.query or proxy.fragment):
+            raise ValueError('HTTP proxies must be loopback URLs with a port and no credentials/path/query')
     return config
 
 

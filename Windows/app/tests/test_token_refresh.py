@@ -49,7 +49,7 @@ class RefreshTests(unittest.TestCase):
         self.backend.expires = time.monotonic() + 3600
         self.backend.expires_at = time.time() + 3600
 
-    def post(self, url, data, token=None, form=False):
+    def post(self, url, data, token=None, form=False, route=None):
         if url == 'https://oauth2.googleapis.com/token':
             self.refreshes += 1
             if self.fail_refresh:
