@@ -7,7 +7,6 @@ import zipfile
 import hashlib
 import contextlib
 import io
-from unittest.mock import patch
 from launcher_common import (configuration, runtime_path, clean_environment,
                              proxy_environment, private_home_environment, acp_environment)
 
