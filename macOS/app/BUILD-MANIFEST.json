@@ -1,13 +1,13 @@
 {
   "package_name": "agyCLI-macos-arm64",
-  "wrapper_version": "1.2.0",
+  "wrapper_version": "1.2.1",
   "platform": "macos-arm64",
-  "build_date": "2026-11-02",
+  "build_date": "2026-11-03",
   "python": "3.11+ recommended; stdlib only",
   "agy_version": "1.4.12",
   "acp_version": "1.4.5",
   "tested_on_real_target": true,
-  "validation": "21 common Python tests on macOS, including Windows path/env branches; macOS real native reply/fixture read; Windows runtime execution NOT tested",
+  "validation": "33 common Python tests on macOS including mocked OAuth expiry/401/concurrency; Windows runtime execution NOT tested",
   "contains_user_state": false,
   "binaries": {
     "agy": {
@@ -44,6 +44,7 @@
     "app/tests/test_acp_terminal.py",
     "app/tests/test_agy_native.py",
     "app/tests/test_launcher_common.py",
+    "app/tests/test_token_refresh.py",
     "app/verify_package.py",
     "docs/README-AI.md",
     "docs/THIRD-PARTY.md",

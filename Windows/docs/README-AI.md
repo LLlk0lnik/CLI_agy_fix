@@ -48,7 +48,7 @@ app/profile/gemini/antigravity-acp/acp_token.json contains sensitive OAuth data.
 
 ## Verification and honest limits
 
-Run `py -3 app/run_tests.py`. All 21 common tests were run on macOS; Windows path/env branches were tested logically, not with actual Windows executables. macOS real native text output and reading a test fixture were verified. Windows PE binaries were downloaded from official Google URLs and checked against upstream SHA-512/SHA-256, but actual Windows startup/login/dialog is unverified. Preserve this limitation in reports.
+Run `py -3 app/run_tests.py`. All 33 common tests were run on macOS; Windows path/env branches were tested logically, not with actual Windows executables. macOS real native text output and reading a test fixture were verified. Windows PE binaries were downloaded from official Google URLs and checked against upstream SHA-512/SHA-256, but actual Windows startup/login/dialog is unverified. Preserve this limitation in reports.
 
 No arbitrary fallback model, endpoint, credential source or entitlement should be substituted silently. If Google returns 403/404, surface the failure and inspect model IDs/config without exposing credentials. Prefer bounded corrections in the affected file; preserve the working ACP fallback and the user's local profile. After code changes run relevant tests, then one necessary smoke check rather than repeated inference.
 
@@ -57,3 +57,7 @@ No arbitrary fallback model, endpoint, credential source or entitlement should b
 Use the manifest's explicit allowlist; no recursive ZIP of the working folder. Include only source, launchers, tests, example/default config, manifests/checksums, docs and the three original runtime binaries. Exclude profile, __pycache__, logs, .DS_Store, credentials and user paths. Preserve executable bits for macOS. Windows .cmd files use CRLF and directly invoke Python without shell-global changes. When sharing after customization use app/pack_clean.py; for a versioned release regenerate hashes and scan text for emails, user paths and literal tokens. Never call an archive "clean" based only on its name.
 
 All Python modules live under app/. ROOT in those modules is the app directory; manifest distribution paths are relative to its parent package directory. Main launchers are at package root; setup holds only Login and Check.
+
+## OAuth recovery contract
+
+Backend.credentials(rejected_token=None) caches credentials with both wall-clock and monotonic deadlines, including a 60-second safety margin measured before the refresh HTTP request. Backend.authenticated_post retries Google HTTP 401 exactly once, before any response body is returned. The lock refreshes only the rejected token; reuse a newer token if another request refreshed it already. Generation must acquire credentials after model-catalog loading to avoid a stale token snapshot. Do not retry 403, transport failures or an interrupted stream: replay may duplicate model work. OAuth invalid_grant raises ReauthenticationRequired and asks for setup/Login; never loop or log token material. The 12 token-refresh tests use only fake credentials, including concurrent 401s, model-list refresh and paused monotonic time.
