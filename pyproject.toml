@@ -1,0 +1,18 @@
+# Lint and type-check settings for the launcher scripts. There is no Python
+# package here: pyproject.toml only holds tool configuration used by CI.
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+# pycodestyle errors, pyflakes, warnings and bugbear. Long lines are part of the
+# existing style, so E501 stays off.
+select = ["E4", "E7", "E9", "F", "W", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+# mypy no longer supports 3.9, so the closest supported version is pinned here.
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
