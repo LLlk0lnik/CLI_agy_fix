@@ -7,9 +7,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
@@ -62,6 +65,10 @@ jobs:
       - name: Run app test suite
         if: matrix.script != 'tools'
         run: python "${{ matrix.script }}"
+
+      - name: Verify package checksums
+        if: matrix.script != 'tools'
+        run: python "${{ matrix.name }}/app/verify_package.py"
 
       - name: Run tools test suite
         if: matrix.script == 'tools'

@@ -32,9 +32,14 @@ def lfs_pointers(root):
     """Runtime files still holding an LFS pointer instead of the original binary."""
     leftovers = []
     for path in runtime_files(root):
-        with path.open('rb') as file:
-            if file.read(len(POINTER)) == POINTER:
-                leftovers.append(path)
+        if not path.is_file():
+            continue
+        try:
+            with path.open('rb') as file:
+                if file.read(len(POINTER)) == POINTER:
+                    leftovers.append(path)
+        except OSError:
+            continue
     return leftovers
 
 
@@ -48,11 +53,12 @@ def verify(root):
 
 def version_text(root=ROOT):
     current = manifest(root / 'BUILD-MANIFEST.json')
+    cmd = 'agym.cmd' if sys.platform.startswith('win') else 'agym'
     print('Обёртка: ' + current['wrapper_version'])
     print('agy ' + current['agy_version'] + ', ACP ' + current['acp_version'])
     print('Платформа: ' + current['platform'])
     print('Установка: ' + str(root.parent))
-    print('Обновление: agym update (только проверка: agym update --check)')
+    print('Обновление: ' + cmd + ' update (только проверка: ' + cmd + ' update --check)')
     return 0
 
 
@@ -61,16 +67,43 @@ def update(root=ROOT, check_only=False, git=git, verify=verify):
         toplevel = Path(git(root, 'rev-parse', '--show-toplevel')).resolve()
         upstream = git(root, 'rev-parse', '--abbrev-ref', '@{u}')
         package = Path(root.parent).resolve().relative_to(toplevel).as_posix()
-        git(root, 'fetch', '--prune', 'origin')
+        manifest_rel = 'app/BUILD-MANIFEST.json' if package == '.' else package + '/app/BUILD-MANIFEST.json'
+        remote_name = upstream.split('/')[0] if '/' in upstream else 'origin'
+        git(root, 'fetch', '--prune', remote_name)
         behind = int(git(root, 'rev-list', '--count', 'HEAD..@{u}'))
-        remote = json.loads(git(root, 'show', upstream + ':' + package + '/app/BUILD-MANIFEST.json'))
-    except (RuntimeError, ValueError, KeyError) as error:
+        remote = json.loads(git(root, 'show', upstream + ':' + manifest_rel))
+    except (RuntimeError, ValueError, KeyError, OSError) as error:
         print('Не удалось проверить обновления: ' + str(error), file=sys.stderr)
         print('agym update работает в git-клоне, где текущая ветка отслеживает origin/main.',
               file=sys.stderr)
         return 1
     current = manifest(root / 'BUILD-MANIFEST.json')
     if behind == 0:
+        leftovers = lfs_pointers(root)
+        if leftovers:
+            if check_only:
+                print('Установлена последняя версия ' + current['wrapper_version'] +
+                      ', но бинарники требуют загрузки через Git LFS.')
+                return 0
+            print('Обнаружены незагруженные бинарники Git LFS. Загрузка...', flush=True)
+            try:
+                git(root, 'lfs', 'pull')
+                leftovers = lfs_pointers(root)
+                if leftovers:
+                    print('Git LFS не восстановил бинарники: ' +
+                          ', '.join(path.name for path in leftovers), file=sys.stderr)
+                    print('Установите git-lfs с https://git-lfs.com и повторите agym update.',
+                          file=sys.stderr)
+                    return 1
+                if verify(root):
+                    print('Проверка SHA256 не прошла, восстановление не подтверждено.',
+                          file=sys.stderr)
+                    return 1
+                print('Бинарники Git LFS успешно восстановлены.')
+                return 0
+            except (RuntimeError, OSError) as error:
+                print('Не удалось загрузить бинарники через Git LFS: ' + str(error), file=sys.stderr)
+                return 1
         print('Обновлений нет: установлена последняя версия ' + current['wrapper_version'] + '.')
         return 0
     if remote['wrapper_version'] == current['wrapper_version']:
@@ -105,15 +138,19 @@ def update(root=ROOT, check_only=False, git=git, verify=verify):
                 print('Установите git-lfs с https://git-lfs.com и повторите agym update.',
                       file=sys.stderr)
                 return 1
-    except RuntimeError as error:
+    except (RuntimeError, OSError) as error:
         print('Обновление не завершено: ' + str(error), file=sys.stderr)
         return 1
     if verify(root):
         print('Проверка SHA256 не прошла, обновление не подтверждено. См. вывод выше.',
               file=sys.stderr)
         return 1
-    print('Обновлено: ' + current['wrapper_version'] + ' -> ' + remote['wrapper_version'])
-    print('Проверка после обновления: agym check')
+    if remote['wrapper_version'] == current['wrapper_version']:
+        print('Обновлено: применены новые коммиты (версия: ' + current['wrapper_version'] + ')')
+    else:
+        print('Обновлено: ' + current['wrapper_version'] + ' -> ' + remote['wrapper_version'])
+    cmd = 'agym.cmd' if sys.platform.startswith('win') else 'agym'
+    print('Проверка после обновления: ' + cmd + ' check')
     return 0
 
 

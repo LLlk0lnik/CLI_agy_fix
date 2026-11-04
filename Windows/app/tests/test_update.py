@@ -34,10 +34,10 @@ class FakeGit:
         command = ' '.join(args)
         self.calls.append(command)
         if command == 'rev-parse --show-toplevel':
-            return str(Path(root).parent)
+            return str(Path(root).parent.parent)
         if command == 'rev-parse --abbrev-ref @{u}':
             return self.upstream
-        if command == 'fetch --prune origin':
+        if command.startswith('fetch --prune'):
             return ''
         if command == 'rev-list --count HEAD..@{u}':
             return str(self.behind)
@@ -113,6 +113,15 @@ class UpdateTests(unittest.TestCase):
             self.assertIn('новые коммиты', text)
             self.assertNotIn('1.2.0 -> 1.2.0', text)
 
+    def test_same_version_update_reports_applied_commits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = make_package(temp)
+            git = FakeGit(behind=3, remote=CURRENT)
+            code, text = self.run_update(app, git)
+            self.assertEqual(code, 0)
+            self.assertIn('применены новые коммиты', text)
+            self.assertNotIn('1.2.0 -> 1.2.0', text)
+
     def test_already_up_to_date_does_nothing(self):
         with tempfile.TemporaryDirectory() as temp:
             app = make_package(temp)
@@ -122,6 +131,17 @@ class UpdateTests(unittest.TestCase):
             self.assertIn('Обновлений нет', text)
             self.assertFalse(git.ran('merge'))
             self.assertFalse(git.ran('status'))
+
+    def test_already_up_to_date_with_leftover_lfs_pointers_heals_installation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = make_package(temp)
+            pointer = runtime_path('agy', app)
+            pointer.write_bytes(POINTER)
+            git = FakeGit(behind=0, remote=CURRENT, pointers=[pointer], restore_lfs=True)
+            code, text = self.run_update(app, git)
+            self.assertEqual(code, 0)
+            self.assertIn('успешно восстановлены', text)
+            self.assertTrue(git.ran('lfs pull'))
 
     def test_local_uncommitted_changes_block_the_update(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -139,7 +159,12 @@ class UpdateTests(unittest.TestCase):
             pointer.write_bytes(POINTER)
             git = FakeGit(pointers=[pointer], restore_lfs=True)
             checked = []
-            code, text = self.run_update(app, git, verify=lambda root: checked.append(root) or 0)
+
+            def record_verify(root):
+                checked.append(root)
+                return 0
+
+            code, text = self.run_update(app, git, verify=record_verify)
             self.assertEqual(code, 0)
             self.assertEqual(checked, [app])
             self.assertLess(git.calls.index('merge --ff-only @{u}'), git.calls.index('lfs pull'))
@@ -171,6 +196,15 @@ class UpdateTests(unittest.TestCase):
             code, text = self.run_update(app, broken)
             self.assertEqual(code, 1)
             self.assertIn('no upstream configured', text)
+
+    def test_missing_git_executable_reports_clean_error(self):
+        def missing(root, *args):
+            raise FileNotFoundError('No such file or directory: git')
+        with tempfile.TemporaryDirectory() as temp:
+            app = make_package(temp)
+            code, text = self.run_update(app, missing)
+            self.assertEqual(code, 1)
+            self.assertIn('No such file or directory: git', text)
 
 
 if __name__ == '__main__':

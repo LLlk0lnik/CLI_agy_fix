@@ -18,6 +18,12 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(cmd.count('--model'), 1)
         self.assertIn('chosen', cmd)
 
+    def test_danger_aliases_are_normalized(self):
+        for flag in ('-y', '-d', '--danger', '--yolo', 'yolo', '--skip-permissions'):
+            cmd = native_command('/agy', [flag, '--print', 'test'])
+            self.assertIn('--dangerously-skip-permissions', cmd)
+            self.assertNotIn(flag, cmd)
+
     def test_active_tier_is_distinct_from_free_tier(self):
         data = {'currentTier': {'id': 'standard-tier'}, 'cloudaicompanionProject': 'project',
                 'ineligibleTiers': [{'tierId': 'free-tier', 'reasonCode': 'UNSUPPORTED_LOCATION'}]}

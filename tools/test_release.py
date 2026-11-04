@@ -48,6 +48,40 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 release.refresh(package)
 
+    def test_refresh_rejects_lfs_pointer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = make_package(temp)
+            (package / 'app/runtime/agy').write_bytes(
+                b'version https://git-lfs.github.com/spec/v1\noid sha256:123\nsize 10\n'
+            )
+            with self.assertRaises(SystemExit) as error:
+                release.refresh(package)
+            self.assertIn('Git LFS', str(error.exception))
+
+    def test_macos_and_windows_source_parity(self):
+        root = release.ROOT
+        macos_app = root / 'macOS/app'
+        windows_app = root / 'Windows/app'
+        shared_files = [
+            'acp_terminal.py',
+            'agy_native.py',
+            'diagnostics.py',
+            'launcher_common.py',
+            'pack_clean.py',
+            'run_tests.py',
+            'update.py',
+            'verify_package.py',
+            'tests/test_acp_terminal.py',
+            'tests/test_agy_native.py',
+            'tests/test_launcher_common.py',
+            'tests/test_token_refresh.py',
+            'tests/test_update.py',
+        ]
+        for rel in shared_files:
+            mac_content = (macos_app / rel).read_bytes()
+            win_content = (windows_app / rel).read_bytes()
+            self.assertEqual(mac_content, win_content, f'Mismatch in shared file: {rel}')
+
 
 if __name__ == '__main__':
     unittest.main()

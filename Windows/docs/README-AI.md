@@ -49,7 +49,7 @@ app/profile/gemini/antigravity-acp/acp_token.json contains sensitive OAuth data.
 
 ## Verification and honest limits
 
-Run `py -3 app/run_tests.py`. All 43 common tests were run on macOS; Windows path/env branches were tested logically, not with actual Windows executables. macOS real native text output and reading a test fixture were verified. Windows PE binaries were downloaded from official Google URLs and checked against upstream SHA-512/SHA-256, but actual Windows startup/login/dialog is unverified. Preserve this limitation in reports.
+Run `py -3 app/run_tests.py`. All 47 common tests were run on macOS; Windows path/env branches were tested logically, not with actual Windows executables. macOS real native text output and reading a test fixture were verified. Windows PE binaries were downloaded from official Google URLs and checked against upstream SHA-512/SHA-256, but actual Windows startup/login/dialog is unverified. Preserve this limitation in reports.
 
 No arbitrary fallback model, endpoint, credential source or entitlement should be substituted silently. If Google returns 403/404, surface the failure and inspect model IDs/config without exposing credentials. Prefer bounded corrections in the affected file; preserve the working ACP fallback and the user's local profile. After code changes run relevant tests, then one necessary smoke check rather than repeated inference.
 

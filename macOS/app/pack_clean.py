@@ -14,7 +14,8 @@ def main(root=None):
     forbidden = {'profile', '__pycache__', '.git', 'dist', 'logs'}
     for name in files:
         relative = Path(name)
-        if relative.is_absolute() or '..' in relative.parts or any(part in forbidden for part in relative.parts):
+        if (relative.is_absolute() or '..' in relative.parts or
+                any(part in forbidden for part in relative.parts) or relative.name == 'config.json'):
             raise ValueError('Unsafe distribution manifest entry')
         if not (root / relative).is_file() or (root / relative).is_symlink():
             raise ValueError('Missing/symlink distribution file: ' + name)
