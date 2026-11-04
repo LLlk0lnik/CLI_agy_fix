@@ -68,7 +68,7 @@ jobs:
 
       - name: Verify package checksums
         if: matrix.script != 'tools'
-        run: python "${{ matrix.name }}/app/verify_package.py"
+        run: python "${{ matrix.name }}/app/verify_package.py" --allow-lfs-pointers
 
       - name: Run tools test suite
         if: matrix.script == 'tools'

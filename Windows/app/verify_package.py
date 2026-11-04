@@ -1,11 +1,33 @@
 #!/usr/bin/env python3
 """Validate the shipped allowlist and hashes; profile is intentionally untracked."""
+import argparse
 import hashlib
 from pathlib import Path
 import sys
 
+LFS_PREFIX = b'version https://git-lfs.github.com/spec/v1'
+
+
+def lfs_pointer_oid(path):
+    try:
+        with path.open('rb') as file:
+            header = file.read(len(LFS_PREFIX))
+            if header == LFS_PREFIX:
+                file.seek(0)
+                for line in file.read().splitlines():
+                    if line.startswith(b'oid sha256:'):
+                        return line.split(b':', 1)[1].strip().decode('ascii')
+    except OSError:
+        pass
+    return None
+
 
 def main():
+    parser = argparse.ArgumentParser(description='Verify package checksums')
+    parser.add_argument('--allow-lfs-pointers', action='store_true',
+                        help='accept unhydrated Git LFS pointer stubs matching the expected OID')
+    args = parser.parse_args()
+
     root = Path(__file__).resolve().parent.parent
     errors = []
     lines = (root / 'app/SHA256SUMS.txt').read_text(encoding='utf-8').splitlines()
@@ -15,6 +37,10 @@ def main():
         if not path.is_file():
             errors.append('Missing: ' + relative)
             continue
+        if args.allow_lfs_pointers:
+            pointer_oid = lfs_pointer_oid(path)
+            if pointer_oid == expected:
+                continue
         digest = hashlib.sha256()
         with path.open('rb') as file:
             for chunk in iter(lambda: file.read(1024 * 1024), b''):
