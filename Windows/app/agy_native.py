@@ -51,11 +51,17 @@ def canonical_model(model, catalog):
     return model
 
 
+DANGER_ALIASES = {'-y', '-d', '--danger', '--yolo', 'yolo', '--skip-permissions'}
+
+
 def native_command(binary, arguments, default_model='gemini-3.8-flash-high'):
     args = []
     settings = {}
     iterator = iter(arguments)
     for arg in iterator:
+        if arg in DANGER_ALIASES:
+            args.append('--dangerously-skip-permissions')
+            continue
         if arg == '--settings':
             value = next(iterator, None)
             if value is None:

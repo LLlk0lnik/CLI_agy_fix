@@ -7,13 +7,12 @@ import zipfile
 import hashlib
 import contextlib
 import io
-from unittest.mock import patch
 from launcher_common import (configuration, runtime_path, clean_environment,
                              proxy_environment, private_home_environment, acp_environment)
 
 
 class LauncherTests(unittest.TestCase):
-    def test_repack_excludes_profile_and_resets_custom_config(self):
+    def test_repack_excludes_profile_and_local_config(self):
         from pack_clean import main
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -22,14 +21,14 @@ class LauncherTests(unittest.TestCase):
             (root / 'config.json').write_text('private-custom-config')
             (root / 'config.example.json').write_text('{}')
             (root / 'SHA256SUMS.txt').write_text('obsolete checksum')
-            files = ['config.json', 'config.example.json', 'SHA256SUMS.txt', 'BUILD-MANIFEST.json']
+            files = ['config.example.json', 'SHA256SUMS.txt', 'BUILD-MANIFEST.json']
             (root / 'BUILD-MANIFEST.json').write_text(json.dumps({'package_name': 'test-package', 'distribution_files': files}))
             with contextlib.redirect_stdout(io.StringIO()):
                 main(root)
             with zipfile.ZipFile(root / 'dist/test-package-clean.zip') as archive:
-                self.assertEqual(len(archive.namelist()), 4)
+                self.assertEqual(len(archive.namelist()), 3)
                 self.assertTrue(all('/profile/' not in name for name in archive.namelist()))
-                self.assertEqual(archive.read('test-package/config.json'), b'{}')
+                self.assertFalse(any(name.endswith('/config.json') for name in archive.namelist()))
                 for line in archive.read('test-package/SHA256SUMS.txt').decode().splitlines():
                     digest, name = line.split('  ', 1)
                     self.assertEqual(hashlib.sha256(archive.read('test-package/' + name)).hexdigest(), digest)
@@ -59,6 +58,18 @@ class LauncherTests(unittest.TestCase):
             (root / 'config.json').write_text(json.dumps({'http_proxy': 'http://external.example:8080'}))
             with self.assertRaises(ValueError):
                 configuration(root)
+
+    def test_missing_local_config_falls_back_to_example(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'config.example.json').write_text(
+                json.dumps({'http_proxy': 'http://127.0.0.1:18080'}))
+            config = configuration(root)
+            self.assertEqual(config['http_proxy'], 'http://127.0.0.1:18080')
+            self.assertEqual(config['default_model'], 'gemini-3.8-flash-high')
+            (root / 'config.example.json').unlink()
+            # A shipped defaults-only tree still runs without any config file.
+            self.assertEqual(configuration(root)['socks_proxy'], 'socks5h://127.0.0.1:10808')
 
     def test_parent_secrets_are_not_forwarded(self):
         base = {'PATH': '/bin', 'GEMINI_API_KEY': 'fake', 'AGY_ADC_AUTH': 'true',

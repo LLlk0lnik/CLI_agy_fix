@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # No branch filter: stacked PRs target feature branches, not only main.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linters
+        run: pip install "ruff==0.14.7" "mypy==2.4.1"
+
+      - name: ruff
+        run: ruff check .
+
+      # The macOS and Windows trees share module names and have no __init__.py,
+      # so mypy has to run on each directory separately.
+      - name: mypy
+        run: |
+          for dir in tools macOS/app Windows/app; do
+            mypy "$dir"
+          done
+
+  test:
+    name: Tests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            script: macOS/app/run_tests.py
+          - name: Windows
+            os: windows-latest
+            script: Windows/app/run_tests.py
+          - name: tools
+            os: ubuntu-latest
+            script: tools
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run app test suite
+        if: matrix.script != 'tools'
+        run: python "${{ matrix.script }}"
+
+      - name: Verify package checksums
+        if: matrix.script != 'tools'
+        run: python "${{ matrix.name }}/app/verify_package.py" --allow-lfs-pointers
+
+      - name: Run tools test suite
+        if: matrix.script == 'tools'
+        run: python -m unittest discover -s tools -t tools

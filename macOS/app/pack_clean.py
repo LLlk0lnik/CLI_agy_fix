@@ -3,7 +3,6 @@
 import json
 import hashlib
 from pathlib import Path
-import stat
 import zipfile
 
 
@@ -15,14 +14,15 @@ def main(root=None):
     forbidden = {'profile', '__pycache__', '.git', 'dist', 'logs'}
     for name in files:
         relative = Path(name)
-        if relative.is_absolute() or '..' in relative.parts or any(part in forbidden for part in relative.parts):
+        if (relative.is_absolute() or '..' in relative.parts or
+                any(part in forbidden for part in relative.parts) or relative.name == 'config.json'):
             raise ValueError('Unsafe distribution manifest entry')
         if not (root / relative).is_file() or (root / relative).is_symlink():
             raise ValueError('Missing/symlink distribution file: ' + name)
     destination = metadata / 'dist'
     destination.mkdir(exist_ok=True)
     target = destination / (manifest['package_name'] + '-clean.zip')
-    sources = {name: (root / name).with_name('config.example.json') if Path(name).name == 'config.json' else root / name for name in files}
+    sources = {name: root / name for name in files}
     hashes = []
     for name, source in sources.items():
         if Path(name).name == 'SHA256SUMS.txt':
@@ -43,7 +43,7 @@ def main(root=None):
             else:
                 archive.write(sources[name], arcname)
     print('Created: ' + str(target))
-    print('Excluded: all profiles, accounts, logs, history and caches. config.json reset to example defaults.')
+    print('Excluded: all profiles, accounts, logs, history and caches. Local config.json is not shipped; config.example.json is.')
 
 
 if __name__ == '__main__':

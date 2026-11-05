@@ -16,7 +16,10 @@ DEFAULTS = {
 
 def configuration(root=ROOT):
     config = DEFAULTS.copy()
+    # config.json is a local, untracked override; the shipped template is the fallback.
     path = root / 'config.json'
+    if not path.exists():
+        path = root / 'config.example.json'
     if path.exists():
         supplied = json.loads(path.read_text(encoding='utf-8-sig'))
         if not isinstance(supplied, dict) or set(supplied) - set(DEFAULTS):

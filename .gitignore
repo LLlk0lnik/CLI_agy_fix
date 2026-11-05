@@ -31,3 +31,7 @@ __pycache__/
 venv/
 .DS_Store
 Thumbs.db
+
+# Local proxy override; config.example.json is the shipped template
+macOS/app/config.json
+Windows/app/config.json
