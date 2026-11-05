@@ -16,8 +16,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from launcher_common import (configuration, clean_environment, proxy_environment,
-                             private_home_environment, runtime_path, client_user_agent)
-from route_health import RoutePool, NoRedirect, NoAvailableRoute, classify_error, has_model_answer
+                             private_home_environment, runtime_path, client_user_agent, build_routes)
+from route_health import RoutePool, NoRedirect, NoAvailableRoute, classify_error, has_model_answer, is_smart_dns
+from smart_dns import SmartDNSHandler
 
 ROOT = Path(__file__).resolve().parent
 PROD = 'https://cloudcode-pa.googleapis.com'
@@ -89,9 +90,11 @@ class Backend:
     def __init__(self, token_path, config=None):
         self.token_path = token_path
         config = configuration() if config is None else config
-        self.routes = RoutePool(config['http_proxy'], config.get('fallback_http_proxies', []))
+        routes = build_routes(config)
+        self.routes = RoutePool(routes[0], routes[1:])
         # Never let inherited NO_PROXY or system bypass settings send Google direct.
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.smart_dns_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), SmartDNSHandler(), NoRedirect())
         self.lock = threading.Lock()
         self.access_token = None
         self.expires = 0
@@ -110,9 +113,12 @@ class Backend:
         if route is None:
             raise NoAvailableRoute()
         request = urllib.request.Request(url, data=body, headers=headers)
-        request.add_unredirected_header('Host', urllib.parse.urlsplit(url).netloc)
-        request.set_proxy(urllib.parse.urlsplit(route).netloc, 'http')
-        response = self.opener.open(request, timeout=180)
+        if is_smart_dns(route):
+            response = self.smart_dns_opener.open(request, timeout=180)
+        else:
+            request.add_unredirected_header('Host', urllib.parse.urlsplit(url).netloc)
+            request.set_proxy(urllib.parse.urlsplit(route).netloc, 'http')
+            response = self.opener.open(request, timeout=180)
         response.agycli_route = route
         return response
 
@@ -133,29 +139,82 @@ class Backend:
             form = {'grant_type': 'refresh_token', 'client_id': data['client_id'],
                     'client_secret': data['client_secret'], 'refresh_token': data['refresh_token']}
             started_monotonic, started_wall = time.monotonic(), time.time()
-            try:
-                with self.post('https://oauth2.googleapis.com/token', form, form=True) as response:
-                    fresh = json.load(response)
-            except urllib.error.HTTPError as error:
-                if error.code == 400:
-                    raw = error.read()
-                    try:
-                        reason = json.loads(raw).get('error')
-                    except (ValueError, AttributeError):
-                        reason = None
-                    if reason == 'invalid_grant':
+            attempted = set()
+            route = self.routes.choose()
+            fresh = None
+            while route is not None:
+                try:
+                    with self.post('https://oauth2.googleapis.com/token', form, form=True, route=route) as response:
+                        fresh = json.load(response)
+                    break
+                except urllib.error.HTTPError as error:
+                    if error.code == 400:
+                        raw = error.read()
+                        try:
+                            reason = json.loads(raw).get('error')
+                        except (ValueError, AttributeError):
+                            reason = None
+                        if reason == 'invalid_grant':
+                            error.close()
+                            raise ReauthenticationRequired(
+                                'Google отозвал или просрочил refresh token. Выполните Login из папки setup.'
+                            ) from None
                         error.close()
-                        raise ReauthenticationRequired(
-                            'Google отозвал или просрочил refresh token. Выполните Login из папки setup.'
-                        ) from None
-                    error.close()
-                    raise urllib.error.HTTPError(error.url, error.code, error.reason,
-                                                 error.headers, io.BytesIO(raw)) from None
-                raise
+                        raise urllib.error.HTTPError(error.url, error.code, error.reason,
+                                                     error.headers, io.BytesIO(raw)) from None
+                    raise
+                except urllib.error.URLError:
+                    self.routes.reject_region(route)
+                    attempted.add(route)
+                    following = self.routes.choose(attempted)
+                    if following is None:
+                        raise
+                    print('Шлюз: ошибка подключения через ' + route + '; переключение на ' + following,
+                          file=sys.stderr)
+                    route = following
+            if fresh is None:
+                raise NoAvailableRoute()
+
             token = fresh['access_token']
-            with self.post(PROD + '/v1internal:loadCodeAssist',
-                           {'metadata': {'ideType': 'ANTIGRAVITY'}}, token) as response:
-                entitlement = json.load(response)
+            attempted = set()
+            route = self.routes.choose()
+            entitlement = None
+            while route is not None:
+                try:
+                    with self.post(PROD + '/v1internal:loadCodeAssist',
+                                   {'metadata': {'ideType': 'ANTIGRAVITY'}}, token, route=route) as response:
+                        entitlement = json.load(response)
+                    break
+                except urllib.error.HTTPError as error:
+                    if error.code != 400:
+                        raise
+                    raw = error.read()
+                    error.close()
+                    preserved = urllib.error.HTTPError(error.url, error.code, error.reason,
+                                                       error.headers, io.BytesIO(raw))
+                    if classify_error(error.code, raw) != 'region':
+                        raise preserved from None
+                    self.routes.reject_region(route)
+                    attempted.add(route)
+                    following = self.routes.choose(attempted)
+                    if following is None:
+                        raise preserved from None
+                    preserved.close()
+                    print('Шлюз: региональный отказ через ' + route + '; следующая попытка через ' + following,
+                          file=sys.stderr)
+                    route = following
+                except urllib.error.URLError:
+                    self.routes.reject_region(route)
+                    attempted.add(route)
+                    following = self.routes.choose(attempted)
+                    if following is None:
+                        raise
+                    print('Шлюз: ошибка подключения через ' + route + '; переключение на ' + following,
+                          file=sys.stderr)
+                    route = following
+            if entitlement is None:
+                raise NoAvailableRoute()
+
             project, endpoint = resolve_entitlement(entitlement)
             self.access_token, self.project, self.endpoint = token, project, endpoint
             lifetime = max(0, int(fresh.get('expires_in', 3600)) - 60)
@@ -347,7 +406,9 @@ def run():
     backend.credentials()
     if sys.argv[1:] == ['--check']:
         backend.models()
-        print('OK: отдельная авторизация, действующий тариф и каталог моделей доступны через Happ.')
+        chosen = backend.routes.choose() or 'smart_dns'
+        route_info = 'SmartDNS' if is_smart_dns(chosen) else 'прокси (' + str(chosen) + ')'
+        print('OK: отдельная авторизация, действующий тариф и каталог моделей доступны (' + route_info + ').')
         print('Профиль штатного CLI: ' + str(native_home))
         return 0
     server = Server(('127.0.0.1', 0), Handler)

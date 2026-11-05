@@ -32,11 +32,11 @@ show_help() {
   cat << 'HELP_TEXT'
 Использование: agym [команда | флаги agy]
 
-agym — модифицированный запуск Antigravity CLI с туннелированием через Happ (локальный прокси) и изолированным профилем.
+agym — модифицированный запуск Antigravity CLI с поддержкой локального прокси Happ, встроенного SmartDNS (без VPN) и изолированным профилем.
 
 Сервисные команды:
   agym login | --login       Авторизация в Google через браузер (OAuth)
-  agym check | --check       Проверка прокси Happ, бинарников и профиля
+  agym check | --check       Проверка прокси/SmartDNS, бинарников и профиля
   agym acp   | --acp [args]  Запуск прямого текстового ACP-клиента
   agym config | --config     Показать действующий config.json (порты Happ)
   agym update [--check]      Обновить установку из git (--check — только проверить)

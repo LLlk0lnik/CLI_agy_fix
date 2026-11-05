@@ -11,6 +11,7 @@ DEFAULTS = {
     'socks_proxy': 'socks5h://127.0.0.1:10808',
     'default_model': 'gemini-3.8-flash-high',
     'fallback_http_proxies': [],
+    'routing': 'auto',
 }
 
 
@@ -47,7 +48,22 @@ def configuration(root=ROOT):
                 or not proxy.port or proxy.username or proxy.password
                 or proxy.path not in ('', '/') or proxy.query or proxy.fragment):
             raise ValueError('HTTP proxies must be loopback URLs with a port and no credentials/path/query')
+    routing = config.get('routing', 'auto')
+    if routing not in ('auto', 'smart_dns', 'proxy'):
+        raise ValueError("config.json: routing must be 'auto', 'smart_dns', or 'proxy'")
     return config
+
+
+def build_routes(config):
+    """Return the ordered list of routes based on routing strategy."""
+    routing = config.get('routing', 'auto')
+    proxies = [config['http_proxy'], *config.get('fallback_http_proxies', [])]
+    if routing == 'smart_dns':
+        return ['smart_dns']
+    if routing == 'proxy':
+        return proxies
+    # auto: configured proxies first, with smart_dns as resilient fallback
+    return [*proxies, 'smart_dns']
 
 
 def runtime_path(name, root=ROOT, windows=None):
@@ -67,9 +83,10 @@ def clean_environment(base=None):
 
 
 def proxy_environment(env, config):
-    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
-        env[key] = config['http_proxy']
-    env['ALL_PROXY'] = env['all_proxy'] = config['socks_proxy']
+    if config.get('routing') != 'smart_dns':
+        for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
+            env[key] = config['http_proxy']
+        env['ALL_PROXY'] = env['all_proxy'] = config['socks_proxy']
     env['NO_PROXY'] = env['no_proxy'] = 'localhost,127.0.0.1,::1'
     return env
 

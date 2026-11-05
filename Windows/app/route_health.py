@@ -13,8 +13,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class NoAvailableRoute(RuntimeError):
     def __init__(self):
-        super().__init__('Все настроенные прокси получили региональный отказ. Смените сервер Happ '
-                         'или повторите через две минуты; прямое подключение отключено.')
+        super().__init__('Все настроенные маршруты (прокси / SmartDNS) недоступны или получили региональный отказ. '
+                         'Смените сервер Happ или повторите через две минуты; прямое подключение отключено.')
+
+
+def is_smart_dns(route):
+    return route == 'smart_dns'
 
 
 def classify_error(status, body):
