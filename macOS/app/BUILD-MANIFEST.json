@@ -7,7 +7,7 @@
   "agy_version": "1.4.12",
   "acp_version": "1.4.5",
   "tested_on_real_target": true,
-  "validation": "47 common Python tests on macOS including mocked OAuth expiry/401/concurrency; Windows runtime execution NOT tested",
+  "validation": "62 Python tests on macOS passed including update flow, region failover and mocked OAuth. Real proxy HTTPS and catalog succeeded; real generation correctly diagnosed Google region HTTP 400. Windows runtime execution NOT tested.",
   "contains_user_state": false,
   "binaries": {
     "agy": {
@@ -35,7 +35,9 @@
     "app/config.example.json",
     "app/diagnostics.py",
     "app/launcher_common.py",
+    "app/model_probe.py",
     "app/pack_clean.py",
+    "app/route_health.py",
     "app/run_tests.py",
     "app/update.py",
     "app/runtime/agy",
@@ -44,6 +46,7 @@
     "app/tests/test_acp_terminal.py",
     "app/tests/test_agy_native.py",
     "app/tests/test_launcher_common.py",
+    "app/tests/test_routes.py",
     "app/tests/test_token_refresh.py",
     "app/tests/test_update.py",
     "app/verify_package.py",
