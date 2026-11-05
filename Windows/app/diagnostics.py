@@ -8,9 +8,9 @@ import subprocess
 import sys
 import urllib.request
 import urllib.error
-from route_health import NoRedirect, classify_error
+from route_health import NoRedirect, classify_error, is_smart_dns
 
-from launcher_common import ROOT, configuration, runtime_path, acp_environment
+from launcher_common import ROOT, configuration, runtime_path, acp_environment, build_routes
 
 
 def main():
@@ -45,25 +45,36 @@ def main():
             return 1
     print('OK: Python ' + platform.python_version() + ', package ' + target + ', all three runtime files present.')
     print('Profile: ' + str(ROOT / 'profile'))
-    print('Configured HTTP proxies: ' + ', '.join([config['http_proxy'], *config.get('fallback_http_proxies', [])]))
+    routes = build_routes(config)
+    print('Configured routes (' + config.get('routing', 'auto') + '): ' + ', '.join(routes))
     if args.offline:
         print('Offline check complete. Network, login and model response were not checked.')
         return 0
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    try:
-        request = urllib.request.Request('https://example.com/')
-        from urllib.parse import urlsplit
-        request.add_unredirected_header('Host', 'example.com')
-        request.set_proxy(urlsplit(config['http_proxy']).netloc, 'http')
-        with opener.open(request, timeout=20) as response:
-            if response.status != 200:
-                raise RuntimeError('Unexpected proxy response')
-    except Exception:
-        print('WARNING: HTTPS test site through the primary proxy is unavailable. This is not a model-region verdict.')
-        if not args.model_test:
-            return 1
-    else:
-        print('OK: HTTPS via primary HTTP proxy. This is not proof of model access.')
+    if config.get('routing') != 'smart_dns':
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        try:
+            request = urllib.request.Request('https://example.com/')
+            from urllib.parse import urlsplit
+            request.add_unredirected_header('Host', 'example.com')
+            request.set_proxy(urlsplit(config['http_proxy']).netloc, 'http')
+            with opener.open(request, timeout=20) as response:
+                if response.status != 200:
+                    raise RuntimeError('Unexpected proxy response')
+            print('OK: HTTPS via primary HTTP proxy. This is not proof of model access.')
+        except Exception:
+            if 'smart_dns' in routes:
+                print('WARNING: primary HTTP proxy unavailable; SmartDNS fallback is available.')
+            else:
+                print('WARNING: HTTPS test site through the primary proxy is unavailable. This is not a model-region verdict.')
+                if not args.model_test:
+                    return 1
+    if 'smart_dns' in routes:
+        try:
+            from smart_dns import GLOBAL_RESOLVER
+            sni_ip = GLOBAL_RESOLVER.get_sni_ip()
+            print('OK: SmartDNS active (SNI target: ' + sni_ip + ').')
+        except Exception as err:
+            print('WARNING: SmartDNS resolution failed (' + type(err).__name__ + ').')
     result = subprocess.run([sys.executable, str(ROOT / 'acp_terminal.py'), '--check'],
                             env=acp_environment(), timeout=45)
     if result.returncode:

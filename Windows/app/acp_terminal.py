@@ -10,7 +10,8 @@ import subprocess
 import sys
 import threading
 import time
-from launcher_common import acp_environment, runtime_path, process_group_options, terminate_owned_process
+from launcher_common import (acp_environment, runtime_path, process_group_options,
+                             terminate_owned_process, configuration)
 
 
 def display(value):
@@ -164,7 +165,31 @@ def main():
     os.umask(0o077)
     profile = root / "profile"
     profile.mkdir(mode=0o700, exist_ok=True)
+    config = configuration(root)
+    routing = config.get('routing', 'auto')
+    forwarder = None
     env = child_environment(root)
+
+    use_forwarder = False
+    if routing == 'smart_dns':
+        use_forwarder = True
+    elif routing == 'auto':
+        import socket
+        from urllib.parse import urlsplit
+        hp = urlsplit(config['http_proxy'])
+        try:
+            with socket.create_connection((hp.hostname, hp.port), timeout=0.5):
+                use_forwarder = False
+        except (OSError, socket.timeout):
+            use_forwarder = True
+
+    if use_forwarder:
+        from smart_dns import SmartDnsForwarder
+        forwarder = SmartDnsForwarder()
+        forwarder.start()
+        for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
+            env[key] = forwarder.proxy_url
+
     cwd = args.cwd.expanduser().resolve(strict=True)
     if not cwd.is_dir():
         parser.error("--cwd должна быть папкой")
@@ -229,6 +254,8 @@ def main():
                 break
     finally:
         client.close()
+        if forwarder is not None:
+            forwarder.stop()
 
 
 if __name__ == "__main__":

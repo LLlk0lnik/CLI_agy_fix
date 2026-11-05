@@ -76,7 +76,7 @@ class EvidenceTests(unittest.TestCase):
 
 class RouteRequestTests(unittest.TestCase):
     def setUp(self):
-        self.backend = Backend(Path('/unused'), {'http_proxy': PRIMARY, 'fallback_http_proxies': [FALLBACK]})
+        self.backend = Backend(Path('/unused'), {'http_proxy': PRIMARY, 'fallback_http_proxies': [FALLBACK], 'routing': 'proxy'})
         self.backend.access_token = 'fake-token'
         self.backend.project = 'test-project'
         self.backend.endpoint = 'https://example.invalid'
@@ -131,6 +131,42 @@ class RouteRequestTests(unittest.TestCase):
 
     def test_redirects_cannot_remove_proxy_binding(self):
         self.assertIsNone(NoRedirect().redirect_request(None, None, 302, 'redirect', {}, 'https://other.invalid'))
+
+    def test_auto_routing_falls_back_to_smart_dns_on_regional_400(self):
+        backend = Backend(Path('/unused'), {'http_proxy': PRIMARY, 'routing': 'auto'})
+        backend.access_token = 'fake-token'
+        backend.project = 'test-project'
+        backend.endpoint = 'https://example.invalid'
+        backend.expires = time.monotonic() + 3600
+        backend.expires_at = time.time() + 3600
+        backend.catalog = {'test': {}}
+        seen = []
+        def post(url, data, token=None, form=False, route=None):
+            seen.append(route)
+            if route == PRIMARY:
+                raise urllib.error.HTTPError(url, 400, 'region', {}, reply(REGION))
+            return reply({'candidates': []})
+        with patch.object(backend, 'post', side_effect=post):
+            with backend.generate('test', {}, True):
+                pass
+        self.assertEqual(seen, [PRIMARY, 'smart_dns'])
+
+    def test_smart_dns_routing_uses_smart_dns_only(self):
+        backend = Backend(Path('/unused'), {'http_proxy': PRIMARY, 'routing': 'smart_dns'})
+        backend.access_token = 'fake-token'
+        backend.project = 'test-project'
+        backend.endpoint = 'https://example.invalid'
+        backend.expires = time.monotonic() + 3600
+        backend.expires_at = time.time() + 3600
+        backend.catalog = {'test': {}}
+        seen = []
+        def post(url, data, token=None, form=False, route=None):
+            seen.append(route)
+            return reply({'candidates': []})
+        with patch.object(backend, 'post', side_effect=post):
+            with backend.generate('test', {}, True):
+                pass
+        self.assertEqual(seen, ['smart_dns'])
 
 
 class ProbeTests(unittest.TestCase):
