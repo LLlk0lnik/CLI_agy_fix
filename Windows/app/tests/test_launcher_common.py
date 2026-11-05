@@ -66,7 +66,7 @@ class LauncherTests(unittest.TestCase):
                 json.dumps({'http_proxy': 'http://127.0.0.1:18080'}))
             config = configuration(root)
             self.assertEqual(config['http_proxy'], 'http://127.0.0.1:18080')
-            self.assertEqual(config['default_model'], 'gemini-3.8-flash-high')
+            self.assertEqual(config['default_model'], '')
             (root / 'config.example.json').unlink()
             # A shipped defaults-only tree still runs without any config file.
             self.assertEqual(configuration(root)['socks_proxy'], 'socks5h://127.0.0.1:10808')

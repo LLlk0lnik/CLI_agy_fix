@@ -3,12 +3,12 @@ setlocal
 set "PYTHONUTF8=1"
 where py >nul 2>nul
 if errorlevel 1 goto use_python
-py -3 "%~dp0app\agy_native.py"  %*
+py -3 "%~dp0app\acp_terminal.py"  %*
 goto done
 :use_python
 where python >nul 2>nul
 if errorlevel 1 goto missing
-python "%~dp0app\agy_native.py"  %*
+python "%~dp0app\acp_terminal.py"  %*
 goto done
 :missing
 echo Python 3.11+ is required. Install it from https://www.python.org/downloads/

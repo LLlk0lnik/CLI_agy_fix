@@ -2,16 +2,15 @@
 import json
 import os
 from pathlib import Path
-import platform
 import subprocess
 
 ROOT = Path(__file__).resolve().parent
 DEFAULTS = {
     'http_proxy': 'http://127.0.0.1:10809',
     'socks_proxy': 'socks5h://127.0.0.1:10808',
-    'default_model': 'gemini-3.8-flash-high',
+    'default_model': '',
     'fallback_http_proxies': [],
-    'routing': 'auto',
+    'routing': 'proxy',
 }
 
 
@@ -26,9 +25,11 @@ def configuration(root=ROOT):
         if not isinstance(supplied, dict) or set(supplied) - set(DEFAULTS):
             raise ValueError('config.json: unknown configuration keys')
         config.update(supplied)
-    for key in ('http_proxy', 'socks_proxy', 'default_model'):
+    for key in ('http_proxy', 'socks_proxy'):
         if not isinstance(config[key], str) or not config[key]:
             raise ValueError('config.json: invalid ' + key)
+    if not isinstance(config['default_model'], str):
+        raise ValueError('config.json: default_model must be a string (empty uses agent default)')
     # Proxy URLs never carry credentials in this distribution's settings.
     from urllib.parse import urlsplit
     fallbacks = config['fallback_http_proxies']
@@ -48,22 +49,14 @@ def configuration(root=ROOT):
                 or not proxy.port or proxy.username or proxy.password
                 or proxy.path not in ('', '/') or proxy.query or proxy.fragment):
             raise ValueError('HTTP proxies must be loopback URLs with a port and no credentials/path/query')
-    routing = config.get('routing', 'auto')
-    if routing not in ('auto', 'smart_dns', 'proxy'):
-        raise ValueError("config.json: routing must be 'auto', 'smart_dns', or 'proxy'")
+    # Migrate the old default without ever enabling its direct SmartDNS fallback.
+    if config['routing'] == 'auto':
+        config['routing'] = 'proxy'
+    if config['routing'] != 'proxy':
+        raise ValueError("SmartDNS removed: set routing to 'proxy' in app/config.json")
+    if fallbacks:
+        raise ValueError('ACP uses one explicit proxy: clear fallback_http_proxies in app/config.json')
     return config
-
-
-def build_routes(config):
-    """Return the ordered list of routes based on routing strategy."""
-    routing = config.get('routing', 'auto')
-    proxies = [config['http_proxy'], *config.get('fallback_http_proxies', [])]
-    if routing == 'smart_dns':
-        return ['smart_dns']
-    if routing == 'proxy':
-        return proxies
-    # auto: configured proxies first, with smart_dns as resilient fallback
-    return [*proxies, 'smart_dns']
 
 
 def runtime_path(name, root=ROOT, windows=None):
@@ -83,10 +76,9 @@ def clean_environment(base=None):
 
 
 def proxy_environment(env, config):
-    if config.get('routing') != 'smart_dns':
-        for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
-            env[key] = config['http_proxy']
-        env['ALL_PROXY'] = env['all_proxy'] = config['socks_proxy']
+    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'):
+        env[key] = config['http_proxy']
+    env['ALL_PROXY'] = env['all_proxy'] = config['socks_proxy']
     env['NO_PROXY'] = env['no_proxy'] = 'localhost,127.0.0.1,::1'
     return env
 
@@ -143,10 +135,31 @@ def terminate_owned_process(proc):
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
 
+def require_proxy(config):
+    """Fail locally if Happ is absent; never switch to a direct/DNS route."""
+    import socket
+    from urllib.parse import urlsplit
+    proxy = urlsplit(config['http_proxy'])
+    try:
+        with socket.create_connection((proxy.hostname, proxy.port), timeout=2):
+            pass
+    except OSError:
+        raise RuntimeError('Прокси Happ недоступен. Включите Happ и проверьте http_proxy; '
+                           'автоматического прямого/SmartDNS-маршрута нет.') from None
 
-def client_user_agent():
-    machine = platform.machine().lower()
-    arch = {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(machine, machine)
-    return ('antigravity/cli/1.4.12 (aidev_client; os_type=' + platform.system().lower() +
-            '; arch=' + arch + '; auth_method=consumer; host_path=agycli-local-bridge/1.1; '
-            'proxy_client=antigravity/sdk)')
+
+def verify_acp_runtime(root=ROOT):
+    """Require the pinned, unmodified Google ACP and its companion harness."""
+    import hashlib
+    manifest = json.loads((root / 'BUILD-MANIFEST.json').read_text(encoding='utf-8'))
+    for name in ('acp', 'harness'):
+        path = runtime_path(name, root)
+        metadata = manifest['binaries'][path.name]
+        if not path.is_file() or path.stat().st_size != metadata['size']:
+            raise RuntimeError('Неверный размер runtime: ' + path.name + '. Проверьте Git LFS и пакет.')
+        digest = hashlib.sha256()
+        with path.open('rb') as source:
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(block)
+        if digest.hexdigest() != metadata['sha256']:
+            raise RuntimeError('SHA256 runtime не совпадает: ' + path.name + '. Агент не запущен.')

@@ -73,11 +73,11 @@ exit /b %errorlevel%
 
 :do_double_dash
 shift
-%PY_CMD% "%BASE_DIR%app\agy_native.py" %1 %2 %3 %4 %5 %6 %7 %8 %9
+%PY_CMD% "%BASE_DIR%app\acp_terminal.py" %1 %2 %3 %4 %5 %6 %7 %8 %9
 exit /b %errorlevel%
 
 :do_help
-echo Usage: agym [command ^| agy flags]
+echo Usage: agym [command ^| ACP flags]
 echo.
 echo Service commands:
 echo   agym login ^| --login       Browser OAuth login
@@ -91,13 +91,13 @@ echo.
 echo Auto-approve:
 echo   -y, -d, --yolo, yolo        Aliases for --dangerously-skip-permissions
 echo.
-echo agy CLI:
-echo   agym                       Start interactive CLI in current directory
+echo ACP terminal:
+echo   agym                       Start official agent via ACP in current directory
 echo   agym -y                    Start with auto-approval of permissions
 echo   agym -p "..."              Single prompt
-echo   agym -c                    Continue last conversation
+echo   agym -c                    Continue last ACP session
 exit /b 0
 
 :do_run
-%PY_CMD% "%BASE_DIR%app\agy_native.py" %*
+%PY_CMD% "%BASE_DIR%app\acp_terminal.py" %*
 exit /b %errorlevel%

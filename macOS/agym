@@ -2,22 +2,22 @@
 set -eo pipefail
 
 # Определение базовой директории пакета
-if [ -n "${AGY_HOME:-}" ] && [ -f "$AGY_HOME/app/agy_native.py" ]; then
+if [ -n "${AGY_HOME:-}" ] && [ -f "$AGY_HOME/app/acp_terminal.py" ]; then
   BASE_DIR="$AGY_HOME"
 else
   # Разрешаем симлинки, если agym вызван из PATH (например, ~/.local/bin/agym)
   SELF_DIR="$(python3 -c "import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))" "$0" 2>/dev/null || true)"
-  if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/app/agy_native.py" ]; then
+  if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/app/acp_terminal.py" ]; then
     BASE_DIR="$SELF_DIR"
-  elif [ -d "$HOME/Desktop/agyCLI-macos-arm64" ] && [ -f "$HOME/Desktop/agyCLI-macos-arm64/app/agy_native.py" ]; then
+  elif [ -d "$HOME/Desktop/agyCLI-macos-arm64" ] && [ -f "$HOME/Desktop/agyCLI-macos-arm64/app/acp_terminal.py" ]; then
     BASE_DIR="$HOME/Desktop/agyCLI-macos-arm64"
-  elif [ -d "$HOME/Desktop/CLI_agy_fix/macOS" ] && [ -f "$HOME/Desktop/CLI_agy_fix/macOS/app/agy_native.py" ]; then
+  elif [ -d "$HOME/Desktop/CLI_agy_fix/macOS" ] && [ -f "$HOME/Desktop/CLI_agy_fix/macOS/app/acp_terminal.py" ]; then
     BASE_DIR="$HOME/Desktop/CLI_agy_fix/macOS"
-  elif [ -d "$HOME/.local/share/agyCLI" ] && [ -f "$HOME/.local/share/agyCLI/app/agy_native.py" ]; then
+  elif [ -d "$HOME/.local/share/agyCLI" ] && [ -f "$HOME/.local/share/agyCLI/app/acp_terminal.py" ]; then
     BASE_DIR="$HOME/.local/share/agyCLI"
   else
     echo "Ошибка: директория пакета agyCLI не найдена." >&2
-    echo "Убедитесь, что agym находится в папке с app/agy_native.py или задайте AGY_HOME=/путь." >&2
+    echo "Убедитесь, что agym находится в папке с app/acp_terminal.py или задайте AGY_HOME=/путь." >&2
     exit 1
   fi
 fi
@@ -30,14 +30,14 @@ fi
 
 show_help() {
   cat << 'HELP_TEXT'
-Использование: agym [команда | флаги agy]
+Использование: agym [команда | флаги ACP]
 
-agym — модифицированный запуск Antigravity CLI с поддержкой локального прокси Happ, встроенного SmartDNS (без VPN) и изолированным профилем.
+agym — терминальный ACP-клиент официального агента Google, с прокси Happ и отдельным профилем.
 
 Сервисные команды:
   agym login | --login       Авторизация в Google через браузер (OAuth)
-  agym check | --check       Проверка прокси/SmartDNS, бинарников и профиля
-  agym acp   | --acp [args]  Запуск прямого текстового ACP-клиента
+  agym check | --check       Проверка прокси, хешей и ACP-рукопожатия
+  agym acp   | --acp [args]  Тот же терминальный ACP-клиент
   agym config | --config     Показать действующий config.json (порты Happ)
   agym update [--check]      Обновить установку из git (--check — только проверить)
   agym --version             Показать версию обёртки, agy и ACP
@@ -48,14 +48,14 @@ agym — модифицированный запуск Antigravity CLI с под
   -y, -d, --yolo, --danger   Короткие алиасы для --dangerously-skip-permissions
                              (автоматически одобряет действия и команды без вопросов)
 
-Команды и флаги agy CLI:
-  agym                       Запустить agy CLI в текущей папке
+Команды и флаги ACP-клиента:
+  agym                       Запустить ACP-чат в текущей папке
   agym -y                    Запустить в режиме авто-одобрения без лишних вопросов
   agym yolo                  То же самое (алиас для agym -y)
   agym -p, --print "..."     Быстрый одиночный запрос в консоли
-  agym -c, --continue        Продолжить предыдущую сессию в проекте
-  agym --model <ID>          Выбрать модель (по умолчанию gemini-3.8-flash-high)
-  agym -- [args]             Принудительно передать аргументы напрямую в agy
+  agym -c, --continue        Продолжить последнюю ACP-сессию в этой папке
+  agym --model <ID>          Выбрать модель (по умолчанию выбирает официальный агент)
+  agym -- [args]             Передать аргументы ACP-клиенту
 HELP_TEXT
 }
 
@@ -119,21 +119,8 @@ case "${1:-}" in
     ;;
   --)
     shift
-    exec "$PYTHON_BIN" "$BASE_DIR/app/agy_native.py" "$@"
+    exec "$PYTHON_BIN" "$BASE_DIR/app/acp_terminal.py" "$@"
     ;;
 esac
 
-# Преобразование коротких флагов для автоподтверждения
-PROCESSED_ARGS=()
-for arg in "$@"; do
-  case "$arg" in
-    -y|-d|--danger|--yolo|yolo|--skip-permissions)
-      PROCESSED_ARGS+=("--dangerously-skip-permissions")
-      ;;
-    *)
-      PROCESSED_ARGS+=("$arg")
-      ;;
-  esac
-done
-
-exec "$PYTHON_BIN" "$BASE_DIR/app/agy_native.py" "${PROCESSED_ARGS[@]}"
+exec "$PYTHON_BIN" "$BASE_DIR/app/acp_terminal.py" "$@"

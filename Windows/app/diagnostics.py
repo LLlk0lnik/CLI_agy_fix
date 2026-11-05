@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
-"""Local preflight. Never starts interactive login or prints credential data."""
+"""Preflight via the official ACP only. Never read OAuth credentials or call Google APIs."""
 import argparse
 import json
 import os
+from pathlib import Path
 import platform
 import subprocess
 import sys
-import urllib.request
-import urllib.error
-from route_health import NoRedirect, classify_error, is_smart_dns
-
-from launcher_common import ROOT, configuration, runtime_path, acp_environment, build_routes
+import tempfile
+from launcher_common import ROOT, configuration, require_proxy, verify_acp_runtime
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--offline', action='store_true', help='check files and architecture only')
-    parser.add_argument('--model-test', action='store_true',
-                        help='send two small synthetic model requests (uses account quota)')
-    parser.add_argument('--probe-model', action='append',
-                        help='with --model-test, test only these explicit model IDs (repeatable)')
+    parser.add_argument('--offline', action='store_true', help='check package and hashes only')
+    parser.add_argument('--model-test', action='store_true', help='one synthetic prompt through ACP (uses quota)')
+    parser.add_argument('--probe-model', action='append', help='model ID advertised by the official agent')
     args = parser.parse_args()
     if args.offline and args.model_test:
         parser.error('--offline cannot be combined with --model-test')
@@ -28,90 +24,36 @@ def main():
     config = configuration()
     manifest = json.loads((ROOT / 'BUILD-MANIFEST.json').read_text(encoding='utf-8'))
     target = manifest['platform']
-    actual = ('windows' if os.name == 'nt' else platform.system().lower())
     expected = 'windows' if target.startswith('windows') else 'darwin'
-    if actual != expected:
-        print('ERROR: this package is for ' + target + '; current OS: ' + actual)
-        return 1
-    machine = platform.machine().lower()
+    actual = 'windows' if os.name == 'nt' else platform.system().lower()
     allowed = ('arm64', 'aarch64') if 'arm64' in target else ('amd64', 'x86_64')
-    if machine not in allowed:
-        print('ERROR: package architecture does not match ' + machine)
-        return 1
-    for name in ('agy', 'acp', 'harness'):
-        path = runtime_path(name)
-        if not path.is_file() or (os.name != 'nt' and not os.access(path, os.X_OK)):
-            print('ERROR: missing/non-executable runtime: ' + path.name)
-            return 1
-    print('OK: Python ' + platform.python_version() + ', package ' + target + ', all three runtime files present.')
+    if actual != expected or platform.machine().lower() not in allowed:
+        raise RuntimeError('Package platform/architecture mismatch: ' + target)
+    verify_acp_runtime()
+    print('OK: pinned Google ACP ' + manifest['acp_version'] + ' and harness SHA256 verified.')
+    print('HTTP proxy: ' + config['http_proxy'])
     print('Profile: ' + str(ROOT / 'profile'))
-    routes = build_routes(config)
-    print('Configured routes (' + config.get('routing', 'auto') + '): ' + ', '.join(routes))
     if args.offline:
-        print('Offline check complete. Network, login and model response were not checked.')
+        print('Offline check complete; no agent login or model request.')
         return 0
-    if config.get('routing') != 'smart_dns':
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-        try:
-            request = urllib.request.Request('https://example.com/')
-            from urllib.parse import urlsplit
-            request.add_unredirected_header('Host', 'example.com')
-            request.set_proxy(urlsplit(config['http_proxy']).netloc, 'http')
-            with opener.open(request, timeout=20) as response:
-                if response.status != 200:
-                    raise RuntimeError('Unexpected proxy response')
-            print('OK: HTTPS via primary HTTP proxy. This is not proof of model access.')
-        except Exception:
-            if 'smart_dns' in routes:
-                print('WARNING: primary HTTP proxy unavailable; SmartDNS fallback is available.')
-            else:
-                print('WARNING: HTTPS test site through the primary proxy is unavailable. This is not a model-region verdict.')
-                if not args.model_test:
-                    return 1
-    if 'smart_dns' in routes:
-        try:
-            from smart_dns import GLOBAL_RESOLVER
-            sni_ip = GLOBAL_RESOLVER.get_sni_ip()
-            print('OK: SmartDNS active (SNI target: ' + sni_ip + ').')
-        except Exception as err:
-            print('WARNING: SmartDNS resolution failed (' + type(err).__name__ + ').')
-    result = subprocess.run([sys.executable, str(ROOT / 'acp_terminal.py'), '--check'],
-                            env=acp_environment(), timeout=45)
-    if result.returncode:
+    require_proxy(config)
+    command = [sys.executable, str(ROOT / 'acp_terminal.py')]
+    result = subprocess.run(command + ['--check'], timeout=45)
+    if result.returncode or not args.model_test:
+        if not result.returncode:
+            print('ACP handshake passed. Account eligibility and generation were NOT checked.')
         return result.returncode
-    token = ROOT / 'profile/gemini/antigravity-acp/acp_token.json'
-    if not token.exists():
-        print('NEXT: run Login in setup, then repeat this check.')
-        print('No account has been copied into this package.')
-        return 1 if args.model_test else 0
-    from agy_native import Backend
-    try:
-        backend = Backend(token, config)
-        catalog = backend.models()
-        backend.catalog = catalog.get('models', {})
-    except urllib.error.HTTPError as error:
-        category = classify_error(error.code, error.read())
-        print('ERROR: catalog check HTTP ' + str(error.code) + ', category: ' + category)
-        error.close()
-        print('Region: check Happ route/server. Authentication: repeat Login. Do not share profile or logs.')
-        return 1
-    except Exception as error:
-        print('ERROR: profile/proxy check failed (' + type(error).__name__ + '). Do not share profile or logs.')
-        return 1
-    print('OK: account tier/project and model catalog available. This does NOT prove generation works.')
-    if not args.model_test:
-        print('NEXT: Check --model-test verifies actual model responses (two small requests use quota).')
-        return 0
-    from model_probe import probe_model
-    models = args.probe_model or [config['default_model'], 'gemini-3.1-flash-lite-preview']
-    results = [probe_model(backend, model) for model in dict.fromkeys(models)]
-    for result in results:
-        print(json.dumps(result, ensure_ascii=False))
-    print('Routes: ' + json.dumps(backend.routes.state(), ensure_ascii=False))
-    if not all(result['status'] == 'model_answer' for result in results):
-        print('NOT READY: a catalog/HTTPS check alone is insufficient. Region failures require a different working exit.')
-        return 1
-    print('OK: every tested model returned actual content through the configured proxy routes.')
+    # Only an explicit model test initiates a session. No project context is supplied.
+    with tempfile.TemporaryDirectory(prefix='agycli-acp-probe-') as directory:
+        for model in list(dict.fromkeys(args.probe_model or [config['default_model']])):
+            probe = command + ['--no-save-session', '--cwd', directory, '--prompt',
+                               'Reply with OK only. Do not use tools, access files or run commands.']
+            if model:
+                probe += ['--model', model]
+            result = subprocess.run(probe, timeout=360)
+            if result.returncode:
+                return result.returncode
+    print('OK: official ACP returned text to the explicit model probe.')
     return 0
 
 
@@ -120,6 +62,6 @@ if __name__ == '__main__':
         sys.exit(main())
     except KeyboardInterrupt:
         sys.exit(130)
-    except Exception as exc:
-        print('Check failed (' + type(exc).__name__ + '). See README.md.', file=sys.stderr)
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+        print('Check failed: ' + str(exc), file=sys.stderr)
         sys.exit(1)

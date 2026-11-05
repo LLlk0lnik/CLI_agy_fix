@@ -72,9 +72,8 @@ class ReleaseTests(unittest.TestCase):
             'update.py',
             'verify_package.py',
             'tests/test_acp_terminal.py',
-            'tests/test_agy_native.py',
+            'tests/test_acp_flow.py',
             'tests/test_launcher_common.py',
-            'tests/test_token_refresh.py',
             'tests/test_update.py',
         ]
         for rel in shared_files:
