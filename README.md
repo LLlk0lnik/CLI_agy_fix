@@ -41,8 +41,8 @@ ZIP через кнопку GitHub Download ZIP может содержать LF
 ## Сборка новой версии
 
 ```bash
-python3 tools/release.py macOS --version 2.0.0   # macOS
-python3 tools/release.py Windows --version 2.0.0 # Windows
+python3 tools/release.py macOS --version 2.2.0   # macOS
+python3 tools/release.py Windows --version 2.2.0 # Windows
 ```
 
 Скрипт пересчитывает SHA256 бинарников и `SHA256SUMS.txt`, обновляет `BUILD-MANIFEST.json`, прогоняет тесты и собирает чистый ZIP через `app/pack_clean.py`. Руками версии и хеши править не нужно.
@@ -65,6 +65,8 @@ agym login
 # Запуск в проекте (без постоянных подтверждений прав)
 agym -y
 ```
+
+Опционально: `python3 -m pip install -r macOS/requirements-ui.txt` (Windows: `Windows/requirements-ui.txt`) включает полноэкранный TUI на textual, а в линейном режиме — историю ввода и rich-панели. В git-клоне обёртка запускает `.venv`, поэтому ставить зависимости нужно в него (`../.venv/bin/python -m pip ...`); другой интерпретатор задаётся переменной `AGYM_PYTHON`. Без этих пакетов остаётся линейный stdlib-чат; `agym --plain` отключает UI принудительно, `agym --tui` требует textual.
 
 ## Личные данные
 

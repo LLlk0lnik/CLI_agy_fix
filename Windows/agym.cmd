@@ -2,6 +2,14 @@
 setlocal
 set "PYTHONUTF8=1"
 
+
+set "BASE_DIR=%~dp0"
+
+set "PY_CMD="
+if defined AGYM_PYTHON set "PY_CMD=%AGYM_PYTHON%"
+if not defined PY_CMD if exist "%BASE_DIR%..\.venv\Scripts\python.exe" set "PY_CMD=%BASE_DIR%..\.venv\Scripts\python.exe"
+if not defined PY_CMD if exist "%BASE_DIR%.venv\Scripts\python.exe" set "PY_CMD=%BASE_DIR%.venv\Scripts\python.exe"
+if defined PY_CMD goto python_ready
 where py >nul 2>nul
 if not errorlevel 1 (
   set "PY_CMD=py -3"
@@ -15,8 +23,7 @@ if not errorlevel 1 (
     exit /b 1
   )
 )
-
-set "BASE_DIR=%~dp0"
+:python_ready
 
 if "%~1"=="login" goto do_login
 if "%~1"=="--login" goto do_login
@@ -96,6 +103,8 @@ echo   agym                       Start official agent via ACP in current direct
 echo   agym -y                    Start with auto-approval of permissions
 echo   agym -p "..."              Single prompt
 echo   agym -c                    Continue last ACP session
+echo   agym --plain               Disable rich/prompt_toolkit (stdlib only)
+echo   agym --tui                 Full-screen TUI (requires textual)
 exit /b 0
 
 :do_run

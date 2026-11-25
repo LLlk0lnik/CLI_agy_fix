@@ -1,3 +1,6 @@
+# Normalize every text file to LF regardless of the platform, then keep
+# batch files CRLF. Hashing in SHA256SUMS must not depend on the checkout OS.
+* text=auto eol=lf
 # Original platform binaries exceed GitHub's normal file-size limit.
 macOS/app/runtime/* filter=lfs diff=lfs merge=lfs -text
 Windows/app/runtime/* filter=lfs diff=lfs merge=lfs -text
