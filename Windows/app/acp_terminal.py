@@ -11,7 +11,7 @@ import threading
 import time
 from launcher_common import (acp_environment, runtime_path, process_group_options,
                              terminate_owned_process, configuration, require_proxy, verify_acp_runtime)
-from ui import TerminalUI, clean
+from ui import TerminalUI, clean, stop_reason_text
 
 
 def display(value):
@@ -27,7 +27,7 @@ class RPCError(RuntimeError):
 
 class Client:
     def __init__(self, command, env, log_path, cwd=None, auto_approve=False, ui=None):
-        self.ui = ui or TerminalUI(rich=False, prompt=False)
+        self.ui = ui or TerminalUI(rich=False, prompt=False, color=False)
         self.log = open(log_path, "a", encoding="utf-8")
         os.chmod(log_path, 0o600)
         try:
@@ -331,7 +331,10 @@ def main(argv=None, root=None):
             client.last_update = None
             result = client.request("session/prompt", {"sessionId": client.session_id,
                                     "prompt": [{"type": "text", "text": prompt}]}, timeout=3600)
-            ui.info("\n[" + display(result.get("stopReason", "готово")) + "]")
+            ui.assistant_end()
+            reason = stop_reason_text(str(result.get("stopReason", "end_turn")))
+            if reason:
+                ui.notice("[" + display(reason) + "]")
             if args.prompt is not None:
                 if not client.answer_seen:
                     raise RuntimeError("Агент не вернул текстовый ответ; успешная генерация не подтверждена.")

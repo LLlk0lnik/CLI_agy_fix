@@ -7,7 +7,7 @@
   "agy_version": "1.4.12",
   "acp_version": "1.4.5",
   "tested_on_real_target": true,
-  "validation": "54 ACP/package Python tests per platform copy passed on macOS; 4 release/source-parity tests passed. Official Google ACP/harness bytes verified against registry-pinned archives for both platforms; new client real macOS handshake passed in an empty profile. Login/generation and Windows runtime execution NOT tested.",
+  "validation": "55 ACP/package Python tests per platform copy passed on macOS; 4 release/source-parity tests passed. Official Google ACP/harness bytes verified against registry-pinned archives for both platforms; new client real macOS handshake passed in an empty profile. Login/generation and Windows runtime execution NOT tested.",
   "contains_user_state": false,
   "binaries": {
     "agy": {

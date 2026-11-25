@@ -50,6 +50,19 @@ def completion_words(models: Iterable[str] = ()) -> list[str]:
     return [*COMMANDS, *models]
 
 
+def stop_reason_text(reason: str) -> str:
+    """Human status for abnormal ACP stop reasons; end_turn stays silent."""
+    return {
+        "end_turn": "",
+        "stop": "",
+        "done": "",
+        "cancelled": "отменено",
+        "max_tokens": "лимит токенов",
+        "max_turn_requests": "лимит шагов",
+        "refusal": "отказ",
+    }.get(reason, reason)
+
+
 class TerminalUI:
     """Render ACP events and read input, with rich/prompt_toolkit when available."""
 
@@ -58,8 +71,11 @@ class TerminalUI:
                  rich: bool | None = None, prompt: bool | None = None,
                  history_path: Path | None = None,
                  models: Callable[[], Sequence[str]] | None = None,
-                 status: Callable[[], str] | None = None) -> None:
+                 status: Callable[[], str] | None = None,
+                 color: bool | None = None) -> None:
         self.stream = stream
+        self.color = ((self._output().isatty() if color is None else color)
+                      and not os.environ.get("NO_COLOR"))
         self._input = input_fn
         self._models = models or (lambda: ())
         self._status = status
@@ -114,6 +130,9 @@ class TerminalUI:
         self._output().write(text + end)
         self._output().flush()
 
+    def _style(self, text: str, code: str) -> str:
+        return f"\x1b[{code}m{text}\x1b[0m" if self.color else text
+
     def set_status(self, text: str) -> None:
         self._status_text = text
 
@@ -135,7 +154,8 @@ class TerminalUI:
             self.console.print(Panel(Text("\n".join(lines)), title="agyCLI", border_style="cyan"))
             return
         for line in lines:
-            self._write(line)
+            label, _, value = line.partition(": ")
+            self._write(self._style(label + ":", "1;36") + (" " + value if value else ""))
 
     def info(self, text: str) -> None:
         if self.console is not None:
@@ -151,9 +171,10 @@ class TerminalUI:
 
     def assistant_start(self) -> None:
         if self.console is not None:
-            self.console.print()
+            from rich.text import Text
+            self.console.print(Text("Агент: ", style="bold green"), end="")
             return
-        self._write()
+        self._write("\n" + self._style("Агент:", "1;32") + " ", end="")
 
     def assistant_chunk(self, text: str) -> None:
         text = clean(text)
@@ -174,7 +195,7 @@ class TerminalUI:
             from rich.text import Text
             self.console.print(Text("▸ " + title, style="bold blue"))
             return
-        self._write("\n[" + title + "]")
+        self._write("\n" + self._style("▸ " + title, "1;34"))
 
     def permission(self, call: dict[str, Any], options: Sequence[dict[str, Any]],
                    auto_approve: bool = False) -> dict[str, Any]:
@@ -195,11 +216,11 @@ class TerminalUI:
                 table.add_row(str(index), clean(option.get("name", option.get("kind", "?"))))
             self.console.print(table)
         else:
-            self._write("\nЗапрос разрешения: " + title)
+            self._write("\n" + self._style("Запрос разрешения:", "1;33") + " " + title)
             if call.get("rawInput") is not None:
                 self._write(clean(json.dumps(call["rawInput"], ensure_ascii=False))[:8000])
             for label in permission_labels(options):
-                self._write("  " + label)
+                self._write("  " + self._style(label, "36"))
         if auto_approve:
             return auto_outcome(options)
         try:

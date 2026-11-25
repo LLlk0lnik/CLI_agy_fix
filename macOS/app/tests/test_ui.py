@@ -41,8 +41,14 @@ class PlainUITests(unittest.TestCase):
         terminal.assistant_end()
         terminal.tool_call("\x1b[31mRead file\x1b[0m")
         self.assertIn("hello", output.getvalue())
-        self.assertIn("[Read file]", output.getvalue())
+        self.assertIn("Агент:", output.getvalue())
+        self.assertIn("▸ Read file", output.getvalue())
         self.assertNotIn("\x1b", output.getvalue())
+
+    def test_end_turn_is_not_shown_as_debug_output(self):
+        self.assertEqual(ui.stop_reason_text("end_turn"), "")
+        self.assertEqual(ui.stop_reason_text("max_tokens"), "лимит токенов")
+        self.assertEqual(ui.stop_reason_text("cancelled"), "отменено")
 
     def test_permission_prompt_returns_denial_on_empty_input(self):
         output = io.StringIO()
