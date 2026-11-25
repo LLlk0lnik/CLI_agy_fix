@@ -50,6 +50,15 @@ def completion_words(models: Iterable[str] = ()) -> list[str]:
     return [*COMMANDS, *models]
 
 
+def textual_available() -> bool:
+    """Whether the optional full-screen UI dependency is importable."""
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def stop_reason_text(reason: str) -> str:
     """Human status for abnormal ACP stop reasons; end_turn stays silent."""
     return {

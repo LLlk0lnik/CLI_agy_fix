@@ -11,7 +11,7 @@ import threading
 import time
 from launcher_common import (acp_environment, runtime_path, process_group_options,
                              terminate_owned_process, configuration, require_proxy, verify_acp_runtime)
-from ui import TerminalUI, clean, stop_reason_text
+from ui import TerminalUI, clean, stop_reason_text, textual_available
 
 
 def display(value):
@@ -240,8 +240,11 @@ def main(argv=None, root=None):
                         "--dangerously-skip-permissions", dest="auto_approve", action="store_true",
                         help="одобрять запрошенные агентом разрешения на одну операцию")
     parser.add_argument("--no-save-session", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--plain", action="store_true",
-                        help="не использовать rich/prompt_toolkit (только stdlib)")
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument("--plain", action="store_true",
+                         help="не использовать rich/prompt_toolkit (только stdlib)")
+    display.add_argument("--tui", action="store_true",
+                         help="полноэкранный текстовый интерфейс (нужен textual)")
     parser.add_argument("--cwd", type=Path, default=Path.cwd(), help="рабочая папка")
     arguments = list(sys.argv[1:] if argv is None else argv)
     # Only the leading command is an alias; a prompt whose text is 'yolo' stays intact.
@@ -250,8 +253,16 @@ def main(argv=None, root=None):
     args = parser.parse_args(arguments)
     if (args.check or args.login) and (args.prompt is not None or args.resume or args.conversation):
         parser.error("--check/--login cannot be combined with a prompt or session resume")
+    if args.tui and (args.check or args.login or args.prompt is not None):
+        parser.error("--tui работает только в интерактивном режиме без --check/--login/-p")
     if args.prompt is not None and not args.prompt.strip():
         parser.error("Запрос не должен быть пустым")
+    terminal_attached = sys.stdin.isatty() and sys.stdout.isatty()
+    if args.tui:
+        if not textual_available():
+            raise RuntimeError("TUI недоступен: установите textual из requirements-ui.txt")
+        if not terminal_attached:
+            raise RuntimeError("TUI требует интерактивный терминал")
     root = Path(__file__).resolve().parent if root is None else Path(root)
     os.umask(0o077)
     profile = root / "profile"
@@ -284,11 +295,12 @@ def main(argv=None, root=None):
                     profile / "server.log", cwd=cwd, auto_approve=args.auto_approve, ui=ui)
     try:
         info = initialize(client)
-        ui.banner(info.get("agentInfo", {}), cwd, state["model"], config["http_proxy"])
         if args.check:
+            ui.banner(info.get("agentInfo", {}), cwd, state["model"], config["http_proxy"])
             ui.info("OK: официальный ACP запущен; вход и запросы к модели не выполнялись.")
             return 0
         if args.login:
+            ui.banner(info.get("agentInfo", {}), cwd, state["model"], config["http_proxy"])
             authenticate(client, info)
             ui.info("Вход завершён.")
             return 0
@@ -297,6 +309,12 @@ def main(argv=None, root=None):
             select_model(client, session, state["model"])
         if not args.no_save_session:
             remember_session(profile, cwd, client.session_id)
+        use_tui = (interactive and not plain and terminal_attached
+                   and (args.tui or textual_available()))
+        if use_tui:
+            from tui import run_tui
+            return run_tui(client, info, session, cwd, state, config, profile)
+        ui.banner(info.get("agentInfo", {}), cwd, state["model"], config["http_proxy"])
         ui.info("Рабочая папка: " + str(cwd))
         ui.info("/quit — выход; /new — новая сессия; /models — список; /model ID — модель")
         while True:

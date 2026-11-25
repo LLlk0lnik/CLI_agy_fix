@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +48,31 @@ for line in sys.stdin:
 """
 
 
+class TtyStream(io.StringIO):
+    """Captured stream that still reports itself as a terminal."""
+
+    def isatty(self):
+        return True
+
+
+class LineUIStub:
+    """Stand-in for the line UI so tests never build prompt_toolkit sessions."""
+
+    def __init__(self, *args, **kwargs):
+        self.calls = []
+
+    def __getattr__(self, name):
+        def record(*args, **kwargs):
+            self.calls.append((name, args))
+        return record
+
+    def ask(self, _prompt):
+        raise EOFError
+
+    def permission(self, call, options, auto_approve=False):
+        return {"outcome": "cancelled"}
+
+
 class ACPFlowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -73,7 +99,7 @@ class ACPFlowTests(unittest.TestCase):
         path = self.root / 'trace.jsonl'
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def run_client(self, args):
+    def run_client(self, args, tty=False, textual=False, calls=None):
         original_client = terminal.Client
         def spawn(command, env, log_path, **kwargs):
             self.assertEqual(command, [str(self.agent)])
@@ -90,11 +116,27 @@ class ACPFlowTests(unittest.TestCase):
             if path == token:
                 raise AssertionError('Client opened agent OAuth credentials')
             return original_read(path, *a, **kw)
-        with patch.object(terminal, 'Client', side_effect=spawn), \
-             patch.object(terminal, 'require_proxy'), patch.object(Path, 'open', safe_open), \
-             patch.dict(os.environ, {'GEMINI_API_KEY': 'inherited-test-secret',
-                                     'GOOGLE_GEMINI_BASE_URL': 'https://do-not-use.invalid'}), \
-             contextlib.redirect_stdout(io.StringIO()):
+        stub = types.ModuleType('tui')
+        def run_tui(client, info, session, cwd, state, config, profile):
+            if calls is not None:
+                calls.append({'client': client, 'session': session, 'cwd': cwd,
+                              'state': dict(state), 'config': config, 'profile': profile})
+            return 0
+        stub.run_tui = run_tui
+        screen = TtyStream() if tty else io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(terminal, 'Client', side_effect=spawn))
+            stack.enter_context(patch.object(terminal, 'require_proxy'))
+            stack.enter_context(patch.object(Path, 'open', safe_open))
+            stack.enter_context(patch.object(terminal, 'textual_available', return_value=textual))
+            stack.enter_context(patch.dict(sys.modules, {'tui': stub}))
+            stack.enter_context(patch.object(sys, 'stdin', TtyStream()))
+            stack.enter_context(contextlib.redirect_stdout(screen))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            if tty:
+                stack.enter_context(patch.object(terminal, 'TerminalUI', LineUIStub))
+            stack.enter_context(patch.dict(os.environ, {'GEMINI_API_KEY': 'inherited-test-secret',
+                                                        'GOOGLE_GEMINI_BASE_URL': 'https://do-not-use.invalid'}))
             return terminal.main([*args, '--cwd', str(self.workspace)], root=self.root)
 
     def test_check_only_initializes_without_authentication(self):
@@ -175,6 +217,47 @@ class ACPFlowTests(unittest.TestCase):
         self.agent.write_text(FAKE.replace('authenticated=False', 'authenticated=True '))
         with self.assertRaises(RuntimeError):
             self.run_client(['--check'])
+        self.assertEqual(self.trace(), [])
+
+    def test_interactive_tty_chat_starts_the_tui(self):
+        calls = []
+        self.assertEqual(self.run_client([], tty=True, textual=True, calls=calls), 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]['session']['sessionId'], 'official-session')
+        self.assertEqual(calls[0]['cwd'], self.workspace)
+        self.assertEqual([r['method'] for r in self.trace()], ['initialize', 'session/new'])
+
+    def test_agym_plain_environment_forces_the_line_client(self):
+        calls = []
+        with patch.dict(os.environ, {'AGYM_PLAIN': '1'}):
+            self.assertEqual(self.run_client([], tty=True, textual=True, calls=calls), 0)
+        self.assertEqual(calls, [])
+
+    def test_plain_flag_wins_over_an_installed_tui(self):
+        calls = []
+        self.assertEqual(self.run_client(['--plain'], tty=True, textual=True, calls=calls), 0)
+        self.assertEqual(calls, [])
+
+    def test_tui_is_not_used_outside_a_terminal_or_for_one_shot_prompts(self):
+        calls = []
+        self.assertEqual(self.run_client([], tty=False, textual=True, calls=calls), 0)
+        self.assertEqual(self.run_client(['-p', 'hello'], tty=True, textual=True, calls=calls), 0)
+        self.assertEqual(calls, [])
+
+    def test_tui_flag_requires_textual_before_the_agent_starts(self):
+        with self.assertRaisesRegex(RuntimeError, 'textual'):
+            self.run_client(['--tui'], tty=True, textual=False)
+        self.assertEqual(self.trace(), [])
+
+    def test_tui_flag_requires_a_terminal_before_the_agent_starts(self):
+        with self.assertRaisesRegex(RuntimeError, 'терминал'):
+            self.run_client(['--tui'], tty=False, textual=True)
+        self.assertEqual(self.trace(), [])
+
+    def test_tui_flag_is_rejected_for_service_and_one_shot_modes(self):
+        for args in (['--tui', '--check'], ['--tui', '--login'], ['--tui', '-p', 'hello']):
+            with self.assertRaises(SystemExit):
+                self.run_client(args, tty=True, textual=True)
         self.assertEqual(self.trace(), [])
 
 
