@@ -69,17 +69,21 @@ class ReleaseTests(unittest.TestCase):
             'launcher_common.py',
             'pack_clean.py',
             'run_tests.py',
+            'ui.py',
             'update.py',
             'verify_package.py',
             'tests/test_acp_terminal.py',
             'tests/test_acp_flow.py',
             'tests/test_launcher_common.py',
+            'tests/test_ui.py',
             'tests/test_update.py',
         ]
         for rel in shared_files:
             mac_content = (macos_app / rel).read_bytes()
             win_content = (windows_app / rel).read_bytes()
             self.assertEqual(mac_content, win_content, f'Mismatch in shared file: {rel}')
+        self.assertEqual((release.ROOT / 'macOS/requirements-ui.txt').read_bytes(),
+                         (release.ROOT / 'Windows/requirements-ui.txt').read_bytes())
 
 
 if __name__ == '__main__':

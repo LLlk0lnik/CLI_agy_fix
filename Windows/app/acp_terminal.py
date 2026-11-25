@@ -5,20 +5,18 @@ import json
 import os
 from pathlib import Path
 import queue
-import re
 import subprocess
 import sys
 import threading
 import time
 from launcher_common import (acp_environment, runtime_path, process_group_options,
                              terminate_owned_process, configuration, require_proxy, verify_acp_runtime)
+from ui import TerminalUI, clean
 
 
 def display(value):
     # Agent output must not execute terminal control sequences.
-    value = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", str(value))
-    value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
-    return "".join(c for c in value if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127))
+    return clean(value)
 
 
 class RPCError(RuntimeError):
@@ -28,7 +26,8 @@ class RPCError(RuntimeError):
 
 
 class Client:
-    def __init__(self, command, env, log_path, cwd=None, auto_approve=False):
+    def __init__(self, command, env, log_path, cwd=None, auto_approve=False, ui=None):
+        self.ui = ui or TerminalUI(rich=False, prompt=False)
         self.log = open(log_path, "a", encoding="utf-8")
         os.chmod(log_path, 0o600)
         try:
@@ -71,7 +70,7 @@ class Client:
             self.log.flush()
             # The browser login URL is needed for the separate profile.
             if "Open the following link" in line:
-                print("\n" + display(line), flush=True)
+                self.ui.notice("\n" + display(line).rstrip())
 
     def send(self, message):
         self.proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
@@ -109,15 +108,15 @@ class Client:
             kind = update.get("sessionUpdate")
             if kind == "agent_message_chunk":
                 if self.last_update != kind:
-                    print()
+                    self.ui.assistant_start()
                 content = update.get("content", {})
                 if content.get("type") == "text":
                     self.answer_seen |= bool(content.get("text", "").strip())
-                    print(display(content.get("text", "")), end="", flush=True)
+                    self.ui.assistant_chunk(display(content.get("text", "")))
             elif kind in ("tool_call", "tool_call_update"):
                 title = update.get("title")
                 if title:
-                    print("\n[" + display(title) + "]", flush=True)
+                    self.ui.tool_call(display(title))
             elif kind == "config_option_update":
                 self.config_options = update.get("configOptions", [])
             self.last_update = kind
@@ -125,28 +124,8 @@ class Client:
             return
         reply = {"jsonrpc": "2.0", "id": message["id"]}
         if method == "session/request_permission":
-            call = params.get("toolCall", {})
-            print("\nЗапрос разрешения: " + display(call.get("title", "действие агента")))
-            if call.get("rawInput") is not None:
-                print(display(json.dumps(call["rawInput"], ensure_ascii=False))[:8000])
-            options = params.get("options", [])
-            for i, option in enumerate(options, 1):
-                print(f"  {i}. {display(option.get('name', option.get('kind', '?')))}")
-            if self.auto_approve:
-                option = next((o for o in options if o.get("kind") == "allow_once"), None)
-                reply["result"] = {"outcome": (
-                    {"outcome": "selected", "optionId": option["optionId"]}
-                    if option else {"outcome": "cancelled"})}
-                self.send(reply)
-                return
-            try:
-                choice = input("Номер разрешения, Enter — отказ: ").strip()
-                index = int(choice) - 1
-                if not 0 <= index < len(options):
-                    raise ValueError()
-                outcome = {"outcome": "selected", "optionId": options[index]["optionId"]}
-            except (ValueError, EOFError):
-                outcome = {"outcome": "cancelled"}
+            outcome = self.ui.permission(params.get("toolCall", {}), params.get("options", []),
+                                         auto_approve=self.auto_approve)
             reply["result"] = {"outcome": outcome}
         else:
             reply["error"] = {"code": -32601, "message": "Client method not supported: " + method}
@@ -261,6 +240,8 @@ def main(argv=None, root=None):
                         "--dangerously-skip-permissions", dest="auto_approve", action="store_true",
                         help="одобрять запрошенные агентом разрешения на одну операцию")
     parser.add_argument("--no-save-session", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--plain", action="store_true",
+                        help="не использовать rich/prompt_toolkit (только stdlib)")
     parser.add_argument("--cwd", type=Path, default=Path.cwd(), help="рабочая папка")
     arguments = list(sys.argv[1:] if argv is None else argv)
     # Only the leading command is an alias; a prompt whose text is 'yolo' stays intact.
@@ -291,29 +272,36 @@ def main(argv=None, root=None):
     verify_acp_runtime(root)
     if not args.check:
         require_proxy(config)
+    plain = args.plain or os.environ.get("AGYM_PLAIN") == "1"
+    interactive = not (args.check or args.login or args.prompt is not None)
+    state = {"model": args.model or config['default_model']}
+    ui = TerminalUI(history_path=profile / "ui-history",
+                    rich=False if plain else None,
+                    prompt=(False if plain or not interactive else None),
+                    status=lambda: (cwd.name + ' · ' + (state['model'] or 'выбор агента') +
+                                    ' · ' + config['http_proxy']))
     client = Client([str(runtime_path('acp', root))], child_environment(root),
-                    profile / "server.log", cwd=cwd, auto_approve=args.auto_approve)
+                    profile / "server.log", cwd=cwd, auto_approve=args.auto_approve, ui=ui)
     try:
         info = initialize(client)
-        print("ACP: " + display(json.dumps(info.get("agentInfo", {}), ensure_ascii=False)))
+        ui.banner(info.get("agentInfo", {}), cwd, state["model"], config["http_proxy"])
         if args.check:
-            print("OK: официальный ACP запущен; вход и запросы к модели не выполнялись.")
+            ui.info("OK: официальный ACP запущен; вход и запросы к модели не выполнялись.")
             return 0
         if args.login:
             authenticate(client, info)
-            print("Вход завершён.")
+            ui.info("Вход завершён.")
             return 0
         session = open_session(client, info, cwd, session_id)
-        model = args.model or config['default_model']
-        if model:
-            select_model(client, session, model)
+        if state["model"]:
+            select_model(client, session, state["model"])
         if not args.no_save_session:
             remember_session(profile, cwd, client.session_id)
-        print("Рабочая папка: " + str(cwd))
-        print("/quit — выход; /new — новая сессия; /models — список; /model ID — модель")
+        ui.info("Рабочая папка: " + str(cwd))
+        ui.info("/quit — выход; /new — новая сессия; /models — список; /model ID — модель")
         while True:
             try:
-                prompt = args.prompt if args.prompt is not None else input("\nВы> ")
+                prompt = args.prompt if args.prompt is not None else ui.ask("\nВы> ")
             except EOFError:
                 break
             if not prompt.strip():
@@ -323,12 +311,12 @@ def main(argv=None, root=None):
             if args.prompt is None and prompt.strip() in ("/quit", "/exit"):
                 break
             if args.prompt is None and prompt.strip() == "/models":
-                print(display(json.dumps(client.config_options or session.get("models", {}), ensure_ascii=False, indent=2)))
+                ui.models(client.config_options or session.get("models", {}))
                 continue
             if args.prompt is None and prompt.strip() == "/new":
                 session = open_session(client, info, cwd)
-                if model:
-                    select_model(client, session, model)
+                if state["model"]:
+                    select_model(client, session, state["model"])
                 if not args.no_save_session:
                     remember_session(profile, cwd, client.session_id)
                 continue
@@ -336,14 +324,14 @@ def main(argv=None, root=None):
                 try:
                     chosen = prompt[7:].strip()
                     select_model(client, session, chosen)
-                    model = chosen
+                    state["model"] = chosen
                 except ValueError as exc:
-                    print(display(exc))
+                    ui.info(str(exc))
                 continue
             client.last_update = None
             result = client.request("session/prompt", {"sessionId": client.session_id,
                                     "prompt": [{"type": "text", "text": prompt}]}, timeout=3600)
-            print("\n[" + display(result.get("stopReason", "готово")) + "]")
+            ui.info("\n[" + display(result.get("stopReason", "готово")) + "]")
             if args.prompt is not None:
                 if not client.answer_seen:
                     raise RuntimeError("Агент не вернул текстовый ответ; успешная генерация не подтверждена.")

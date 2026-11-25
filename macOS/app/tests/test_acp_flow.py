@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import acp_terminal as terminal
-from launcher_common import configuration, runtime_path, require_proxy, verify_acp_runtime
+from launcher_common import configuration, runtime_path, require_proxy
 
 FAKE = r"""import json,sys,pathlib
 root=pathlib.Path(__file__).parent.parent

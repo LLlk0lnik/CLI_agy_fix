@@ -10,6 +10,27 @@ from unittest.mock import patch
 from acp_terminal import Client, RPCError, child_environment, display
 
 
+class RecordingUI:
+    def __init__(self):
+        self.starts = 0
+        self.chunks = []
+        self.tools = []
+        self.permissions = []
+
+    def assistant_start(self):
+        self.starts += 1
+
+    def assistant_chunk(self, text):
+        self.chunks.append(text)
+
+    def tool_call(self, title):
+        self.tools.append(title)
+
+    def permission(self, call, options, auto_approve=False):
+        self.permissions.append((call, options, auto_approve))
+        return {"outcome": "cancelled"}
+
+
 class EnvironmentTests(unittest.TestCase):
     def test_private_profile_and_no_inherited_credentials(self):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake", "GOOGLE_API_KEY": "fake",
@@ -61,6 +82,39 @@ for line in sys.stdin:
         with contextlib.redirect_stdout(output):
             self.assertEqual(self.client.request("initialize", {}, 3), {"ok": True})
         self.assertIn("hello", output.getvalue())
+
+    def test_session_updates_are_rendered_through_ui(self):
+        recording = RecordingUI()
+        self.client.ui = recording
+        self.client.handle({"method": "session/update", "params": {"update": {
+            "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}}})
+        self.client.handle({"method": "session/update", "params": {"update": {
+            "sessionUpdate": "tool_call", "title": "Read file"}}})
+        self.assertEqual(recording.chunks, ["hi"])
+        self.assertEqual(recording.tools, ["Read file"])
+        self.assertGreaterEqual(recording.starts, 1)
+
+    def test_permission_is_delegated_to_ui(self):
+        recording = RecordingUI()
+        self.client.ui = recording
+        sent = []
+        self.client.send = sent.append
+        self.client.handle({"jsonrpc": "2.0", "id": 1, "method": "session/request_permission",
+                            "params": {"toolCall": {"title": "Write"}, "options": [
+                                {"optionId": "yes", "name": "Allow once", "kind": "allow_once"}]}})
+        self.assertEqual(recording.permissions[0][0]["title"], "Write")
+        self.assertEqual(sent, [{"jsonrpc": "2.0", "id": 1,
+                                "result": {"outcome": {"outcome": "cancelled"}}}])
+
+    def test_auto_approve_is_passed_to_ui(self):
+        recording = RecordingUI()
+        self.client.ui = recording
+        self.client.auto_approve = True
+        self.client.send = lambda _: None
+        self.client.handle({"jsonrpc": "2.0", "id": 1, "method": "session/request_permission",
+                            "params": {"toolCall": {"title": "Write"}, "options": [
+                                {"optionId": "yes", "name": "Allow once", "kind": "allow_once"}]}})
+        self.assertTrue(recording.permissions[0][2])
 
     def test_permission_defaults_to_denial(self):
         with patch("builtins.input", return_value=""), contextlib.redirect_stdout(io.StringIO()):

@@ -8,6 +8,8 @@ Capabilities: fs.readTextFile=false, fs.writeTextFile=false, terminal=false. The
 
 Configuration: loopback HTTP/SOCKS proxies, default_model (empty means the official agent default), routing=proxy, fallback_http_proxies=[]. Legacy auto maps to proxy without a fallback. SmartDNS and nonempty fallbacks are rejected. The local HTTP proxy is checked before login/session creation. Environment changes are child-local. Proxy use by the upstream agent and its route through Happ are not an OS firewall guarantee.
 
+UI: ui.py is an optional presentation layer. It imports prompt_toolkit/rich only when stdin and stdout are TTYs; otherwise the stdlib renderer is used. --plain or AGYM_PLAIN=1 forces the stdlib path. The UI never reads credentials, never calls Google and only keeps input history in app/profile/ui-history. The ACP transport and permission contract stay in acp_terminal.py; do not move protocol logic into ui.py.
+
 Credentials and logs: GEMINI_HOME points to app/profile/gemini; AGY_ACP_FORCE_FILE_STORAGE=1 preserves profile isolation. HOME is not changed, allowing the real browser launcher. Only the official agent opens credentials. The client writes server.log and last-session.json (ACP session ID and canonical cwd only), both within the ignored profile. No existing profile is copied, deleted or migrated. Never include profiles in artifacts.
 
 Integrity: verify_acp_runtime hashes the ACP executable and companion harness against BUILD-MANIFEST before every spawn. Upstream archive hashes were checked against the current ACP Registry and extracted files compared with the bundled bytes on 2026-11-05. Both platforms share identical Python code. Keep manifest allowlists and checksums current using tools/release.py; do not publish LFS pointer stubs.

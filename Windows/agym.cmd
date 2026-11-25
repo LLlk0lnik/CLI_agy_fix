@@ -96,6 +96,7 @@ echo   agym                       Start official agent via ACP in current direct
 echo   agym -y                    Start with auto-approval of permissions
 echo   agym -p "..."              Single prompt
 echo   agym -c                    Continue last ACP session
+echo   agym --plain               Disable rich/prompt_toolkit (stdlib only)
 exit /b 0
 
 :do_run

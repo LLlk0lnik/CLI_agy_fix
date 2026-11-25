@@ -1,13 +1,13 @@
 {
   "package_name": "agyCLI-windows-x64",
-  "wrapper_version": "2.0.0",
+  "wrapper_version": "2.1.0",
   "platform": "windows-x64",
-  "build_date": "2026-11-05",
-  "python": "3.11+ recommended; stdlib only",
+  "build_date": "2026-11-25",
+  "python": "3.11+; stdlib only, optional prompt_toolkit/rich for the enhanced terminal UI",
   "agy_version": "1.4.12",
   "acp_version": "1.4.5",
   "tested_on_real_target": false,
-  "validation": "42 ACP/package Python tests per platform copy passed on macOS; 4 release/source-parity tests passed. Official Google ACP/harness bytes verified against registry-pinned archives for both platforms; new client real macOS handshake passed in an empty profile. Login/generation and Windows runtime execution NOT tested.",
+  "validation": "54 ACP/package Python tests per platform copy passed on macOS; 4 release/source-parity tests passed. Official Google ACP/harness bytes verified against registry-pinned archives for both platforms; new client real macOS handshake passed in an empty profile. Login/generation and Windows runtime execution NOT tested.",
   "contains_user_state": false,
   "binaries": {
     "agy.exe": {
@@ -50,7 +50,10 @@
     "docs/THIRD-PARTY.md",
     "docs/ZED-ACP-AUDIT.md",
     "setup/Check.cmd",
-    "setup/Login.cmd"
+    "setup/Login.cmd",
+    "requirements-ui.txt",
+    "app/ui.py",
+    "app/tests/test_ui.py"
   ],
   "upstream_cli_manifest": {
     "version": "1.4.12",
